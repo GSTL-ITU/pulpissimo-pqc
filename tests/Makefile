@@ -21,6 +21,12 @@ WAVES      ?= 0
 SW_VERBOSE ?= 0
 JOBS       ?= $(shell nproc)
 
+# A test's optional test.mk can override defaults, e.g. `TIMEOUT_US = 5000000`
+# (command-line values still win)
+ifdef TEST
+-include $(TESTS_DIR)/$(TEST)/test.mk
+endif
+
 ifeq ($(CORE),ibex)
 CORE_TYPE := 1
 USE_FPU   := 0
@@ -119,10 +125,21 @@ ifndef TEST
 endif
 	@test -d $(TESTS_DIR)/$(TEST) || (echo "No such test: $(TEST)"; exit 1)
 
+# pulp-runtime's linker script with a configurable stack size (upstream has a
+# fixed 2 KiB). sw.mk puts this directory first on the linker search path and
+# sets __stack_size from the test's STACK_SIZE.
+LD_DIR    := $(BUILD_DIR)/ld
+LD_SCRIPT := $(LD_DIR)/chips/pulpissimo/link.ld
+
+$(LD_SCRIPT): $(ROOT)/sw/pulp-runtime/kernel/chips/pulpissimo/link.ld
+	@mkdir -p $(dir $@)
+	sed 's/^\(\s*\)\. = \. + 0x800;/\1. = . + (DEFINED(__stack_size) ? __stack_size : 0x800);/' $< > $@
+	@grep -q "__stack_size" $@ || (echo "stack size patch did not apply to $<"; rm -f $@; exit 1)
+
 .PHONY: sw
-sw: check-test
+sw: check-test $(LD_SCRIPT)
 	@$(MAKE) --no-print-directory -C $(TESTS_DIR)/$(TEST) -f $(ENV_DIR)/sw.mk TEST=$(TEST) CORE=$(CORE) \
-	  TARGET_BUILD_DIR=$(SW_DIR) $(if $(filter 1,$(SW_VERBOSE)),,QUIET=1) all
+	  TARGET_BUILD_DIR=$(SW_DIR) LD_DIR=$(LD_DIR) $(if $(filter 1,$(SW_VERBOSE)),,QUIET=1) all
 	@python3 -I $(ENV_DIR)/elf2mem.py $(ELF) $(MEM)
 	@riscv32-unknown-elf-objdump -d -S $(ELF) > $(SW_DIR)/$(TEST).dis
 

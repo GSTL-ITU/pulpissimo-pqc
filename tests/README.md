@@ -25,7 +25,9 @@ make run TEST=hello CORE=ibex
 ```
 
 The first `run` verilates the SoC (about 1.5 min). After that the model is
-rebuilt only when the environment files change.
+rebuilt only when the environment files change. It is **not** rebuilt when
+you edit the SoC's RTL (`hw/`, `.bender/`): run `make clean` after any
+hardware change, otherwise the old model is used.
 
 Example output:
 
@@ -44,6 +46,19 @@ Options:
 | `TIMEOUT_US` | `100000`   | Simulated time after which the test fails       |
 | `WAVES`      | `0`        | `1` dumps an FST waveform                       |
 | `SW_VERBOSE` | `0`        | `1` shows the full compiler command lines       |
+
+## Tests
+
+| Test | What it does | Wall time (CV32E40P) |
+|------|--------------|----------------------|
+| `hello` | Prints a line and exits | ~2 s |
+| `l2_preload` | Checks that a 96 KiB table loaded into all L2 regions reads back correctly | ~15 s |
+| `cycle_count` | Example of timing one function call with `cycles.h` | ~2 s |
+| `kyber_ref` | Upstream Kyber functional test (`test_kyber.c`), see [Kyber](#kyber-ml-kem) | ~13 min |
+| `kyber_cycles` | Cycle counts of Kyber keypair / encapsulation / decapsulation | ~4.5 min |
+
+Ibex takes about 1.5–2x longer in wall time. `make all-tests` runs everything, so
+expect it to take about 20 minutes because of the Kyber tests.
 
 ## Adding a test
 
@@ -69,10 +84,22 @@ flags or sources, add an optional `test.mk` in the folder:
 ```make
 PULP_APP_CFLAGS += -DMY_DEFINE=1
 PULP_APP_SRCS   += ../common/helpers.c
+STACK_SIZE = 0x4000        # bytes, default 0x800 (2 KiB)
+TIMEOUT_US = 1000000       # this test's default simulation timeout
 ```
+
+| `test.mk` variable | Default | Meaning |
+|--------------------|---------|---------|
+| `PULP_APP_CFLAGS`, `PULP_APP_SRCS` | | Extra compiler flags / extra source files (paths relative to the test folder) |
+| `STACK_SIZE` | `0x800` | Stack size in bytes. The runtime's default is only 2 KiB, and **overflowing it is silent** (it corrupts other memory), so raise it for code with large local arrays. |
+| `TIMEOUT_US` | `100000` | Default timeout for this test. A `TIMEOUT_US=` on the command line still wins. |
+
+After changing only flags (in `test.mk` or on the command line), run
+`make clean-sw`: objects are rebuilt when sources change, not when flags do.
 
 pulp-runtime headers (`pulp.h`, HAL, drivers) are on the include path. See
 `sw/pulp-runtime` and `sw/regression_tests` for examples of peripheral access.
+`memcmp`, `memcpy`, `memset` and `memmove` are available.
 
 ## Measuring cycles
 
@@ -94,6 +121,95 @@ cycles_print("my_function", n);        // print only after measuring
 `tests/cycle_count/` is a complete example. Mark the measured function
 `__attribute__((noinline))` so it stays a real call. The minimal `printf` has
 no `%llu`, so use `cycles_print()` for 64-bit counts.
+
+| Function | Purpose |
+|----------|---------|
+| `cycles_enable()` | Start the counter. Call once before measuring. CV32E40P resets with it **off**, so without this every count is 0. |
+| `cycles_read()` | Current 64-bit cycle count |
+| `cycles_overhead()` | Cycles taken by the reads themselves (CV32E40P: 13, Ibex: 4). Subtract it from each measurement. |
+| `cycles_print(label, n)` | Prints `label: n cycles` |
+
+Counts are in SoC clock cycles: 50 MHz in this simulator, 10 MHz on the
+Nexys FPGA targets. They are identical between simulation and hardware for
+code that only uses the core and memory.
+
+## Kyber (ML-KEM)
+
+Two tests run the CRYSTALS-Kyber reference implementation
+([pq-crystals/kyber](https://github.com/pq-crystals/kyber), folder `ref/`):
+
+| Test | Purpose |
+|------|---------|
+| `kyber_ref` | Upstream functional test: shared keys match, and a wrong secret key or modified ciphertext gives a different key |
+| `kyber_cycles` | Measures `crypto_kem_keypair`, `crypto_kem_enc` and `crypto_kem_dec` separately and prints the cycle counts |
+
+The Kyber code exists once, in `kyber_ref/`. `kyber_cycles` compiles it from
+there through its `test.mk`. What was copied and changed is listed in
+[kyber_ref/README.md](kyber_ref/README.md). In short, `randombytes()` is
+replaced by a **fixed-seed pseudorandom generator**, so every run produces
+the same keys and the same cycle counts. It is not secure; use it for
+testing only.
+
+```sh
+make run TEST=kyber_cycles             # Kyber768 on CV32E40P, ~4.5 min
+make run TEST=kyber_cycles CORE=ibex   # ~7.5 min
+make run TEST=kyber_ref                # functional test, ~13 min
+```
+
+Example output of `kyber_cycles`:
+
+```
+[STDOUT-CL31_PE0, 104855.890 us] Kyber768
+[STDOUT-CL31_PE0, 104900.910 us] crypto_kem_keypair: 1525439 cycles
+[STDOUT-CL31_PE0, 104946.050 us] crypto_kem_enc    : 1741553 cycles
+[STDOUT-CL31_PE0, 104991.170 us] crypto_kem_dec    : 1959591 cycles
+[STDOUT-CL31_PE0, 105040.510 us] measurement overhead (subtracted): 13 cycles
+[STDOUT-CL31_PE0, 105052.190 us] shared keys match
+[TB] 105053.410 us: PASSED (exit code 0)
+```
+
+The test fails if the two shared keys differ, so a printed count always
+belongs to a correct run.
+
+### Options
+
+| Variable | Default | Tests | Meaning |
+|----------|---------|-------|---------|
+| `KYBER_K` | `3` | both | Parameter set: `2` = Kyber512, `3` = Kyber768, `4` = Kyber1024 |
+| `NTESTS` | `1` | `kyber_ref` | Iterations of the three checks. Upstream uses 1000; each iteration takes ~13 min here. |
+| `CORE` | `cv32e40p` | both | `cv32e40p` or `ibex` |
+
+Kyber needs a 32 KiB stack (`STACK_SIZE = 0x8000` in both `test.mk` files),
+and its timeout is 2 s of simulated time. Larger parameter sets take
+proportionally longer; if a run hits the timeout, add `TIMEOUT_US=5000000`.
+
+**Run `make clean-sw` before changing `KYBER_K` or `NTESTS`**, otherwise the
+objects compiled for the previous setting are reused:
+
+```sh
+make clean-sw && make run TEST=kyber_cycles KYBER_K=2   # Kyber512
+```
+
+### Results (Kyber768, `-O2`)
+
+| Operation | CV32E40P (cycles) | Ibex (cycles) | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
+|-----------|------------------:|--------------:|------------------:|--------------:|
+| `crypto_kem_keypair` | 1,525,439 | 2,102,051 | 152.5 ms | 210.2 ms |
+| `crypto_kem_enc` | 1,741,553 | 2,387,903 | 174.2 ms | 238.8 ms |
+| `crypto_kem_dec` | 1,959,591 | 2,724,809 | 196.0 ms | 272.5 ms |
+
+10 MHz is the SoC clock of the Nexys FPGA targets. Both cores run plain
+RV32IM(F)C code: stock GCC can't generate CV32E40P's PULP instructions.
+Keep this in mind when comparing with published figures.
+
+### Timing other Kyber functions
+
+To time internal functions (e.g. `poly_ntt`, `indcpa_keypair_derand`), add
+measurements to `kyber_cycles/kyber_cycles.c` the same way. Include the
+function's header (`#include "poly.h"`, `"indcpa.h"`, ...) and call it
+between two `cycles_read()` calls. The headers map names to Kyber's
+namespaced symbols, so the plain names work. Print only after all
+measurements are done.
 
 ## Outputs
 
@@ -125,6 +241,12 @@ Workarounds applied by the Makefile (originals untouched):
 - `tbtools` (Questa DPI VIPs) is excluded.
 - `hw/padframe/padframe_adapter.sv` is compiled from a copy in `build/` with
   a `$error` format/argument mismatch fixed, which Verilator rejects.
+- pulp-runtime's linker script is regenerated in `build/ld/` with a
+  configurable stack size (the original fixes it at 2 KiB).
+- `env/include/libc_compat.h` is force-included in every test. It declares
+  `memcmp`, which the runtime implements but its `string.h` omits.
+
+The full history of what was changed and why is in [CHANGES.md](CHANGES.md).
 
 ## Limitations
 
@@ -137,5 +259,7 @@ Workarounds applied by the Makefile (originals untouched):
   and the UART RX pad is only pulled up. Peripheral tests that need an
   external device need a model added to the TB.
 - **printf goes through the simulation-only virtual stdout**, not the UART.
+- **RTL edits don't trigger a model rebuild.** Run `make clean` after changing
+  hardware sources.
 - Simulation speed is about 350–500 µs of simulated time per wall-clock
   second, roughly 20k core cycles/s.

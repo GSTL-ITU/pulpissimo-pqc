@@ -41,8 +41,14 @@ PULP_APP_SRCS     = $(wildcard *.c)
 PULP_APP_ASM_SRCS = $(wildcard *.S)
 PULP_CFLAGS      += -O2 -g
 # Shared test helpers, e.g. #include "cycles.h"
-PULP_APP_CFLAGS  += -I$(ENV_DIR)include
+PULP_APP_CFLAGS  += -I$(ENV_DIR)include -include $(ENV_DIR)include/libc_compat.h
+
+# Stack size in bytes; tests that need more set it in test.mk
+STACK_SIZE ?= 0x800
 
 -include test.mk
+
+# Our generated link.ld (see tests/Makefile) shadows the runtime's copy
+PULP_ARCH_LDFLAGS += -L$(LD_DIR) -Wl,--defsym=__stack_size=$(STACK_SIZE)
 
 include $(PULPRT_HOME)/rules/pulp.mk

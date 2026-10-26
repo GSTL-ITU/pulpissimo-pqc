@@ -10,3 +10,6 @@ working_dir/
 /utils/bin/padrick
 /Bender.local
 /build
+
+# Upstream Kyber clone (sources used by tests/kyber_ref are copied there)
+/kyber/
