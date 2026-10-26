@@ -30,16 +30,23 @@ day-to-day usage, see [README.md](README.md).
 
 Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4).
 
-### Dilithium2 cycle counts (headline result)
+### Dilithium cycle counts (headline result)
 
-| Operation | CV32E40P | Ibex |
-|---|---:|---:|
-| `crypto_sign_keypair` | 3,307,132 | 4,470,567 |
-| `crypto_sign` | 22,185,892 | 27,902,534 |
-| `crypto_sign_open` | 3,582,361 | 4,769,927 |
-| Peak stack | 52,692 B | 52,692 B |
+| Parameter set | Operation | CV32E40P | Ibex |
+|---|---|---:|---:|
+| Dilithium2 | `crypto_sign_keypair` | 3,307,132 | 4,470,567 |
+| | `crypto_sign` | 22,185,892 | 27,902,534 |
+| | `crypto_sign_open` | 3,582,361 | 4,769,927 |
+| Dilithium3 | `crypto_sign_keypair` | 5,862,770 | 7,885,341 |
+| | `crypto_sign` | 23,929,764 | 29,310,726 |
+| | `crypto_sign_open` | 6,004,625 | 7,951,948 |
+| Dilithium5 | `crypto_sign_keypair` | 9,872,005 | 13,342,864 |
+| | `crypto_sign` | 25,324,770 | 31,619,827 |
+| | `crypto_sign_open` | 10,155,428 | 13,554,960 |
 
-Details in [Dilithium](#2026-10-26-dilithium-ml-dsa-testsdilithium_ref-and-testsdilithium_cycles).
+Signing counts are single samples (rejection sampling), so they are not
+comparable between modes. Details in
+[Dilithium parameter sweep](#2026-10-26-dilithium-parameter-sweep-dilithium_mode--2-3-5).
 
 ---
 
@@ -564,8 +571,8 @@ separate cycles test that compiles it from there.
 |---|---|---|
 | `DILITHIUM_MODE` | `2` | Upstream default (2, 3 or 5) |
 | `NTESTS` | `1` | `dilithium_ref` only |
-| `STACK_SIZE` | `0x20000` (128 KiB) | Measured peak for Dilithium2 in `dilithium_cycles`: 52,692 B. `dilithium_ref` adds ~11 KiB of arrays on its own stack (m, m2, sm, pk, sk). **Modes 3/5 are not measured**; `dilithium_cycles` fails with a message on overflow, `dilithium_ref` has no such check. |
-| `TIMEOUT_US` | `4000000` | Dilithium2 needs ~0.6 s simulated; larger modes need more |
+| `STACK_SIZE` | `0x20000` (128 KiB) | Measured peak for Dilithium2 in `dilithium_cycles`: 52,692 B. `dilithium_ref` adds ~11 KiB of arrays on its own stack (m, m2, sm, pk, sk). Later made mode-dependent, see [Dilithium parameter sweep](#2026-10-26-dilithium-parameter-sweep-dilithium_mode--2-3-5). |
+| `TIMEOUT_US` | `4000000` | Dilithium2 needs ~0.6 s simulated. Later raised to 8 s. |
 
 `dilithium_cycles` measures the API calls used by the upstream test:
 `crypto_sign_keypair`, `crypto_sign` (= `crypto_sign_signature` plus a copy
@@ -593,6 +600,57 @@ Dilithium2, `-O2`, fixed-seed RNG; deterministic.
   sample for the fixed seed; benchmarks usually report a median over many
   runs. Not done here: each Dilithium2 signature takes ~18 min of wall time.
 - `make all-tests` now takes well over an hour.
+
+---
+
+## 2026-10-26: Dilithium parameter sweep (`DILITHIUM_MODE` = 2, 3, 5)
+
+### Settings changed (both `dilithium_ref/test.mk` and `dilithium_cycles/test.mk`)
+
+| Variable | Before | Now | Why |
+|---|---|---|---|
+| `STACK_SIZE` | `0x20000` | `0x20000` for mode 2, `0x30000` (192 KiB) for modes 3/5 | Mode 2 unchanged so its layout, and its counts, stay identical to the first run. Measured peaks below. |
+| `TIMEOUT_US` | `4000000` | `8000000` | Dilithium5 on Ibex needs 1.18 s simulated |
+
+Largest image (Dilithium5): text 22,760 + bss 213,596 B, about 236 KB of
+the 320 KB L2.
+
+### Results
+
+All six runs PASSED (signature verified, no stack overflow). The Dilithium2
+counts are **identical** to the first run (same build layout). The six ran in
+parallel; wall times were 36–72 min each (Dilithium5 on Ibex longest), longer
+than a run on its own (Dilithium2 alone: 25 min).
+
+| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
+|---|---|---:|---:|---:|---:|---:|
+| Dilithium2 | keypair | 3,307,132 | 4,470,567 | 1.35 | 330.7 ms | 447.1 ms |
+| | sign | 22,185,892 | 27,902,534 | 1.26 | 2,218.6 ms | 2,790.3 ms |
+| | open | 3,582,361 | 4,769,927 | 1.33 | 358.2 ms | 477.0 ms |
+| Dilithium3 | keypair | 5,862,770 | 7,885,341 | 1.34 | 586.3 ms | 788.5 ms |
+| | sign | 23,929,764 | 29,310,726 | 1.22 | 2,393.0 ms | 2,931.1 ms |
+| | open | 6,004,625 | 7,951,948 | 1.32 | 600.5 ms | 795.2 ms |
+| Dilithium5 | keypair | 9,872,005 | 13,342,864 | 1.35 | 987.2 ms | 1,334.3 ms |
+| | sign | 25,324,770 | 31,619,827 | 1.25 | 2,532.5 ms | 3,162.0 ms |
+| | open | 10,155,428 | 13,554,960 | 1.33 | 1,015.5 ms | 1,355.5 ms |
+
+| Parameter set | Peak stack (both cores) | of `STACK_SIZE` | Simulated time (CV32E40P / Ibex) |
+|---|---:|---:|---:|
+| Dilithium2 | 52,692 B | 131,072 B | 0.59 / 0.75 s |
+| Dilithium3 | 80,340 B | 196,608 B | 0.73 / 0.91 s |
+| Dilithium5 | 123,332 B | 196,608 B | 0.92 / 1.18 s |
+
+`dilithium_ref` adds ~11 KiB, so all modes also fit there (not run for
+modes 3/5).
+
+### Note: signing counts are single samples
+
+Keypair and verify scale with the matrix size (about 1.8× and 3× of
+Dilithium2). Signing barely grows, because the number of rejection-loop
+repetitions for this fixed seed and message differs between the modes. The
+signing numbers are not a fair comparison between modes. That would need the
+median over many seeds, which is too slow in RTL simulation (~20–30 min of
+wall time per signature).
 
 ---
 
@@ -642,7 +700,7 @@ stays untouched. **Not done yet.**
 
 Time = cycles / 10 MHz. The cycle counts are in the
 [Kyber sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4) and
-[Dilithium](#2026-10-26-dilithium-ml-dsa-testsdilithium_ref-and-testsdilithium_cycles)
+[Dilithium sweep](#2026-10-26-dilithium-parameter-sweep-dilithium_mode--2-3-5)
 sections.
 
 | Algorithm | Operation | CV32E40P | Ibex |
@@ -651,6 +709,8 @@ sections.
 | Kyber768 | keypair / enc / dec | 152.6 / 174.2 / 196.0 ms | 210.2 / 238.8 / 272.5 ms |
 | Kyber1024 | keypair / enc / dec | 238.7 / 263.7 / 291.3 ms | 330.6 / 365.0 / 407.5 ms |
 | Dilithium2 | keypair / sign / open | 330.7 / 2,218.6 / 358.2 ms | 447.1 / 2,790.3 / 477.0 ms |
+| Dilithium3 | keypair / sign / open | 586.3 / 2,393.0 / 600.5 ms | 788.5 / 2,931.1 / 795.2 ms |
+| Dilithium5 | keypair / sign / open | 987.2 / 2,532.5 / 1,015.5 ms | 1,334.3 / 3,162.0 / 1,355.5 ms |
 
 At the simulator's 50 MHz the times are 5× shorter. The cycle counts are
 identical; only peripheral-bound code depends on the SoC:peripheral clock

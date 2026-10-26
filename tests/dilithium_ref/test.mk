@@ -8,8 +8,14 @@ PULP_APP_CFLAGS += -DDILITHIUM_MODE=$(DILITHIUM_MODE) -DNTESTS=$(NTESTS)
 SW_VARIANT = mode$(DILITHIUM_MODE)-n$(NTESTS)
 
 # The reference code keeps the public matrix and other polynomial vectors on
-# the stack. Sized from the peak usage measured by dilithium_cycles; see
-# README.md.
+# the stack. Sized from the peak usage measured by dilithium_cycles (see
+# README.md): Dilithium2 stays at 128 KiB so its code layout, and therefore
+# its cycle counts, match earlier runs; the larger modes get 192 KiB.
+ifeq ($(DILITHIUM_MODE),2)
 STACK_SIZE = 0x20000
+else
+STACK_SIZE = 0x30000
+endif
 
-TIMEOUT_US = 4000000
+# Simulated-time limit; signing time varies (rejection sampling)
+TIMEOUT_US = 8000000

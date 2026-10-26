@@ -27,18 +27,17 @@ Changed:
 |----------|---------|---------|
 | `DILITHIUM_MODE` | `2` | `2` = Dilithium2, `3` = Dilithium3, `5` = Dilithium5 (upstream default: 2) |
 | `NTESTS` | `1` | Iterations (upstream: 10000, far too slow for RTL simulation; one takes ~28 min here) |
-| `STACK_SIZE` | `0x20000` | 128 KiB. Dilithium2 needs ~52 KiB in `dilithium_cycles`, plus ~11 KiB for the arrays `test_dilithium.c` keeps on the stack. |
-| `TIMEOUT_US` | `4000000` | Simulated-time limit |
+| `STACK_SIZE` | `0x20000` / `0x30000` | 128 KiB for Dilithium2, 192 KiB for Dilithium3/5. Peak use in `dilithium_cycles` is 52.7 / 80.3 / 123.3 KiB, plus ~11 KiB for the arrays `test_dilithium.c` keeps on the stack. |
+| `TIMEOUT_US` | `8000000` | Simulated-time limit |
 
 Override them on the command line, e.g.
 `make run TEST=dilithium_ref DILITHIUM_MODE=3`. Each combination builds into
 its own directory (`build/sw-<core>/dilithium_ref-mode<M>-n<NTESTS>/`, via
 `SW_VARIANT`), so no clean is needed when switching.
 
-The stack size was only measured for Dilithium2. Modes 3 and 5 use larger
-matrices and need more stack. Run `dilithium_cycles` with the same mode
-first: it reports peak usage and fails if the stack overflowed. This test
-has no such check.
+The stack sizes come from the peak usage measured by `dilithium_cycles`,
+which fails if the stack overflowed. This test has no such check, so if you
+change the code, check the new mode with `dilithium_cycles` first.
 
 ## Pass criteria
 

@@ -57,7 +57,7 @@ Options:
 | `kyber_ref` | Upstream Kyber functional test (`test_kyber.c`), see [Kyber](#kyber-ml-kem) | ~13 min |
 | `kyber_cycles` | Cycle counts of Kyber keypair / encapsulation / decapsulation | ~4.5 min |
 | `dilithium_ref` | Upstream Dilithium functional test (`test_dilithium.c`), see [Dilithium](#dilithium-ml-dsa) | ~28 min |
-| `dilithium_cycles` | Cycle counts of Dilithium keypair / sign / verify, plus peak stack usage | ~25 min |
+| `dilithium_cycles` | Cycle counts of Dilithium keypair / sign / verify, plus peak stack usage | ~25 min (Dilithium2), ~40 min (Dilithium5) |
 
 Ibex takes about 1.5–2x longer in wall time. `make all-tests` runs
 everything, so expect it to take **well over an hour** because of the PQC
@@ -315,34 +315,57 @@ count always belongs to a correct run.
 | `NTESTS` | `1` | `dilithium_ref` | Iterations. Upstream uses 10000; each iteration takes ~28 min here. |
 | `CORE` | `cv32e40p` | both | `cv32e40p` or `ibex` |
 
-Both tests use a 128 KiB stack (`STACK_SIZE = 0x20000`) and a 4 s
-simulated-time limit. **The stack was only measured for Dilithium2** (52.7
-KiB). Modes 3 and 5 need more: run `dilithium_cycles` for the new mode
-first, since it fails with a clear message if the stack overflows.
+The stack size depends on the mode: 128 KiB (`0x20000`) for Dilithium2 and
+192 KiB (`0x30000`) for Dilithium3/5, set in `test.mk`. Peak use measured by
+`dilithium_cycles` is 52.7 / 80.3 / 123.3 KiB (see the results below), so
+both tests have room to spare, including the ~11 KiB of extra arrays that
+`test_dilithium.c` keeps on its stack. The simulated-time limit is 8 s
+(Dilithium5 on Ibex needs ~1.2 s).
 
 Each setting builds into its own directory (e.g.
 `build/sw-<core>/dilithium_cycles-mode3/`), so no clean is needed when
 switching:
 
 ```sh
-make run TEST=dilithium_cycles DILITHIUM_MODE=3 TIMEOUT_US=8000000
+make run TEST=dilithium_cycles DILITHIUM_MODE=3
 ```
 
-### Results (Dilithium2, `-O2`)
+### Results (`-O2`, all parameter sets)
 
-| Operation | CV32E40P (cycles) | Ibex (cycles) | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
-|-----------|------------------:|--------------:|------------------:|--------------:|
-| `crypto_sign_keypair` | 3,307,132 | 4,470,567 | 330.7 ms | 447.1 ms |
-| `crypto_sign` | 22,185,892 | 27,902,534 | 2,218.6 ms | 2,790.3 ms |
-| `crypto_sign_open` | 3,582,361 | 4,769,927 | 358.2 ms | 477.0 ms |
-| Peak stack | 52,692 B | 52,692 B | | |
+Cycles:
+
+| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P |
+|---------------|-----------|---------:|-----:|----------------:|
+| Dilithium2 (`DILITHIUM_MODE=2`) | `crypto_sign_keypair` | 3,307,132 | 4,470,567 | 1.35 |
+| | `crypto_sign` | 22,185,892 | 27,902,534 | 1.26 |
+| | `crypto_sign_open` | 3,582,361 | 4,769,927 | 1.33 |
+| Dilithium3 (`DILITHIUM_MODE=3`) | `crypto_sign_keypair` | 5,862,770 | 7,885,341 | 1.34 |
+| | `crypto_sign` | 23,929,764 | 29,310,726 | 1.22 |
+| | `crypto_sign_open` | 6,004,625 | 7,951,948 | 1.32 |
+| Dilithium5 (`DILITHIUM_MODE=5`) | `crypto_sign_keypair` | 9,872,005 | 13,342,864 | 1.35 |
+| | `crypto_sign` | 25,324,770 | 31,619,827 | 1.25 |
+| | `crypto_sign_open` | 10,155,428 | 13,554,960 | 1.33 |
+
+Time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
+
+| Parameter set | Operation | CV32E40P | Ibex | Peak stack (both cores) |
+|---------------|-----------|---------:|-----:|------------------------:|
+| Dilithium2 | keypair / sign / open | 330.7 / 2,218.6 / 358.2 ms | 447.1 / 2,790.3 / 477.0 ms | 52,692 of 131,072 B |
+| Dilithium3 | keypair / sign / open | 586.3 / 2,393.0 / 600.5 ms | 788.5 / 2,931.1 / 795.2 ms | 80,340 of 196,608 B |
+| Dilithium5 | keypair / sign / open | 987.2 / 2,532.5 / 1,015.5 ms | 1,334.3 / 3,162.0 / 1,355.5 ms | 123,332 of 196,608 B |
 
 **Signing time varies with the input.** Dilithium signing repeats an inner
 loop until a candidate signature passes its checks (rejection sampling), and
-the number of repetitions depends on the key, message and randomness. The
+the number of repetitions depends on the key, message and randomness. Each
 count above is one sample for the fixed seed. A different seed or message
 gives a different signing count, often by a large factor. Key generation and
 verification vary only slightly. Published benchmarks usually report the median over many runs.
+
+This is why the signing counts above barely grow from Dilithium2 to
+Dilithium5, while key generation and verification roughly triple. Each
+signing count is a single sample, and the number of loop repetitions
+differs between the modes. Don't compare signing cost between modes from
+these numbers. The same layout drift as for Kyber (~0.01%) applies.
 
 ## Outputs
 
