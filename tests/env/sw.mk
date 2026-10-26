@@ -40,6 +40,8 @@ PULP_APP          = $(TEST)
 PULP_APP_SRCS     = $(wildcard *.c)
 PULP_APP_ASM_SRCS = $(wildcard *.S)
 PULP_CFLAGS      += -O2 -g
+# Shared test helpers, e.g. #include "cycles.h"
+PULP_APP_CFLAGS  += -I$(ENV_DIR)include
 
 -include test.mk
 

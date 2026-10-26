@@ -74,6 +74,27 @@ PULP_APP_SRCS   += ../common/helpers.c
 pulp-runtime headers (`pulp.h`, HAL, drivers) are on the include path. See
 `sw/pulp-runtime` and `sw/regression_tests` for examples of peripheral access.
 
+## Measuring cycles
+
+`env/include/cycles.h` is on every test's include path. It reads the
+standard `mcycle` counter, so the counts work on both cores and match real
+hardware, as long as nothing prints inside the measured region.
+
+```c
+#include "cycles.h"
+
+cycles_enable();                       // required: CV32E40P resets with the counter off
+uint64_t overhead = cycles_overhead(); // cost of the reads themselves
+uint64_t t0 = cycles_read();
+my_function();
+uint64_t n = cycles_read() - t0 - overhead;
+cycles_print("my_function", n);        // print only after measuring
+```
+
+`tests/cycle_count/` is a complete example. Mark the measured function
+`__attribute__((noinline))` so it stays a real call. The minimal `printf` has
+no `%llu`, so use `cycles_print()` for 64-bit counts.
+
 ## Outputs
 
 `build/sw-<core>/<test>/` holds the ELF, the disassembly (`<test>.dis`), the

@@ -236,3 +236,60 @@ JTAG ADAPTER: DIGILENT JTAG-HS2
   current OpenOCD needs `adapter driver ftdi`, `adapter speed`, etc.
   Adapt it in a copy under tests/. Not needed for the Nexys Video, which
   has on-board JTAG.
+
+
+2026-10-26: cycle_count test and cycles.h (repo: pulpissimo-pqc)
+-----------------------------------------------------------------
+
+CONTEXT
+  Work moved to a copy of the repo at /home/baris/gstl/pulpissimo-pqc. The
+  copied tests/build/ still pointed at /home/baris/gstl/pulpissimo/ (bender
+  emits absolute paths, and the copied mtimes did not trigger a rebuild), so
+  the simulator was built from the OTHER repo's RTL. Fixed with
+  `make clean` followed by a rebuild. If the repo is copied or moved again,
+  run `make clean` first.
+
+FILES
+  tests/env/include/cycles.h     cycles_enable / cycles_read (64-bit
+                                 mcycleh/mcycle with a wrap-safe re-read) /
+                                 cycles_overhead / cycles_print
+  tests/env/sw.mk                adds -I$(ENV_DIR)include to every test
+  tests/cycle_count/cycle_count.c  example: measure one noinline call
+                                 (FNV-1a over 256 words), print afterwards
+  tests/README.md                new "Measuring cycles" section
+
+FACTS LEARNED
+  - CV32E40P resets mcountinhibit implemented bits to 1 (counters OFF;
+    cv32e40p_cs_registers.sv "default disable"). cycles_enable() clears bit 0
+    (CY). Ibex counts by default; clearing the bit is harmless there.
+  - The minimal libc printf ignores length modifiers and reads every integer
+    as 32-bit, so %llu does not work. cycles_print() formats uint64 itself.
+  - CSR numbers are used directly (0x320, 0xB00, 0xB80), independent of the
+    assembler's CSR name support.
+
+RESULTS (deterministic across runs)
+  cv32e40p: 1806 cycles, overhead 13 -> ~7 cycles/iteration (code runs from
+            L2, no I-cache)
+  ibex:     2573 cycles, overhead 4
+  Both: result 0xfd44f0c5, all-tests 3/3 PASS.
+
+
+OPEN ISSUE: simulator does not rebuild when RTL changes (not fixed yet)
+-----------------------------------------------------------------------
+  In tests/Makefile, $(SIM_BIN) depends only on files.f, the patched
+  padframe_adapter.sv, env/tb_verilator.sv and env/clock_gen_verilator.sv.
+  files.f in turn depends only on Bender.lock and the Makefile. NONE of the
+  hardware sources (hw/*.sv, .bender/git/checkouts/**, Bender.yml) are
+  prerequisites.
+  Effect: after editing RTL (e.g. adding a PQC accelerator), `make run`
+  silently keeps using the old simulator.
+  Workaround until fixed: `make clean` (or delete build/sim-*) after any
+  RTL change.
+  Planned fix (the user deferred it on 2026-10-26):
+    - make $(SIM_BIN) depend on every source file listed in files.f (e.g.
+      generate a .d file from files.f with the non-`+` lines, or use
+      Verilator's own dependency file obj/Vtb_verilator__ver.d)
+    - make files.f also depend on Bender.yml (root and hw/padframe) so
+      added or removed files are picked up
+  Related: build/ holds absolute paths (bender output), so after copying or
+  moving the repo, run `make clean`.
