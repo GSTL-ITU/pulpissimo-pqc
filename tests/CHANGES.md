@@ -8,7 +8,7 @@ day-to-day usage, see [README.md](README.md).
 | | |
 |---|---|
 | **Repo** | `/home/baris/gstl/pulpissimo-pqc` (a copy of `/home/baris/gstl/pulpissimo`) |
-| **Constraint** | Do **not** modify upstream/tracked code. Everything lives in `tests/`. The only exception, at the user's request, is `/kyber/` in the root `.gitignore`. |
+| **Constraint** | Do **not** modify upstream/tracked code. Everything lives in `tests/`. Exceptions, both at the user's request: `/kyber/` in the root `.gitignore`, and a note at the top of the root `README.md` pointing to `tests/` (the rest of that README is unchanged). |
 | **Simulator** | Verilator, both cores (`CORE=cv32e40p` default, `CORE=ibex`) |
 | **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles` |
 | **Hardware** | No JTAG adapter yet; board not confirmed (Nexys Video or Nexys 4 DDR) |
@@ -366,8 +366,8 @@ moving the repo, run `make clean`.
 
 - https://github.com/pq-crystals/kyber, commit `3edd5af5`, folder `ref/`.
 - Cloned to `<repo>/kyber/`, which is in the **root** `.gitignore` as
-  `/kyber/`. This is the only change to a tracked upstream file, made at the
-  user's request.
+  `/kyber/`. This change to a tracked upstream file was made at the user's
+  request. The other one is the note at the top of the root `README.md`.
 - The needed `ref/` files are copied unchanged into `tests/kyber_ref/`.
   Modifications are documented in
   [kyber_ref/README.md](kyber_ref/README.md):
