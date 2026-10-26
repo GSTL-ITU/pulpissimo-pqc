@@ -97,9 +97,13 @@ TIMEOUT_US = 1000000       # this test's default simulation timeout
 | `PULP_APP_CFLAGS`, `PULP_APP_SRCS` | | Extra compiler flags / extra source files (paths relative to the test folder) |
 | `STACK_SIZE` | `0x800` | Stack size in bytes. The runtime's default is only 2 KiB, and **overflowing it is silent** (it corrupts other memory), so raise it for code with large local arrays. |
 | `TIMEOUT_US` | `100000` | Default timeout for this test. A `TIMEOUT_US=` on the command line still wins. |
+| `SW_VARIANT` | | Suffix for the test's build directory, e.g. `SW_VARIANT = k$(KYBER_K)` builds into `build/sw-<core>/<test>-k3/`. Give every configuration flag a place in it. |
 
-After changing only flags (in `test.mk` or on the command line), run
-`make clean-sw`: objects are rebuilt when sources change, not when flags do.
+Objects are rebuilt when sources change, not when flags do. For a
+configuration variable on the command line (like `KYBER_K`), add it to
+`SW_VARIANT` so each value gets its own build directory. That way switching
+needs no clean, and several configurations can run in parallel. Otherwise,
+run `make clean-sw` after changing flags.
 
 pulp-runtime headers (`pulp.h`, HAL, drivers) are on the include path. See
 `sw/pulp-runtime` and `sw/regression_tests` for examples of peripheral access.
@@ -165,7 +169,7 @@ Two tests run the CRYSTALS-Kyber reference implementation
 | Test | Purpose |
 |------|---------|
 | `kyber_ref` | Upstream functional test: shared keys match, and a wrong secret key or modified ciphertext gives a different key |
-| `kyber_cycles` | Measures `crypto_kem_keypair`, `crypto_kem_enc` and `crypto_kem_dec` separately and prints the cycle counts |
+| `kyber_cycles` | Measures `crypto_kem_keypair`, `crypto_kem_enc` and `crypto_kem_dec` separately and prints the cycle counts and peak stack usage |
 
 The Kyber code exists once, in `kyber_ref/`. `kyber_cycles` compiles it from
 there through its `test.mk`. What was copied and changed is listed in
@@ -183,16 +187,17 @@ make run TEST=kyber_ref                # functional test, ~13 min
 Example output of `kyber_cycles`:
 
 ```
-[STDOUT-CL31_PE0, 104855.890 us] Kyber768
-[STDOUT-CL31_PE0, 104900.910 us] crypto_kem_keypair: 1525439 cycles
-[STDOUT-CL31_PE0, 104946.050 us] crypto_kem_enc    : 1741553 cycles
-[STDOUT-CL31_PE0, 104991.170 us] crypto_kem_dec    : 1959591 cycles
-[STDOUT-CL31_PE0, 105040.510 us] measurement overhead (subtracted): 13 cycles
-[STDOUT-CL31_PE0, 105052.190 us] shared keys match
-[TB] 105053.410 us: PASSED (exit code 0)
+[STDOUT-CL31_PE0, 105682.390 us] Kyber768
+[STDOUT-CL31_PE0, 105727.410 us] crypto_kem_keypair: 1525556 cycles
+[STDOUT-CL31_PE0, 105772.550 us] crypto_kem_enc    : 1741674 cycles
+[STDOUT-CL31_PE0, 105817.670 us] crypto_kem_dec    : 1959668 cycles
+[STDOUT-CL31_PE0, 105867.010 us] measurement overhead (subtracted): 13 cycles
+[STDOUT-CL31_PE0, 106544.610 us] peak stack usage: 14804 of 32768 bytes
+[STDOUT-CL31_PE0, 106556.250 us] shared keys match
+[TB] 106557.470 us: PASSED (exit code 0)
 ```
 
-The test fails if the two shared keys differ, so a printed count always
+The test fails if the two shared keys differ or the stack overflowed, so a printed count always
 belongs to a correct run.
 
 ### Options
@@ -207,24 +212,52 @@ Kyber needs a 32 KiB stack (`STACK_SIZE = 0x8000` in both `test.mk` files),
 and its timeout is 2 s of simulated time. Larger parameter sets take
 proportionally longer; if a run hits the timeout, add `TIMEOUT_US=5000000`.
 
-**Run `make clean-sw` before changing `KYBER_K` or `NTESTS`**, otherwise the
-objects compiled for the previous setting are reused:
+Each setting builds into its own directory
+(`build/sw-<core>/kyber_cycles-k2/`, `kyber_ref-k3-n1/`, ...), so you can
+switch without cleaning and run several in parallel shells:
 
 ```sh
-make clean-sw && make run TEST=kyber_cycles KYBER_K=2   # Kyber512
+make run TEST=kyber_cycles KYBER_K=2   # Kyber512
+make run TEST=kyber_cycles KYBER_K=4   # Kyber1024
 ```
 
-### Results (Kyber768, `-O2`)
+`kyber_cycles` also prints peak stack usage and fails if the stack
+overflowed.
 
-| Operation | CV32E40P (cycles) | Ibex (cycles) | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
-|-----------|------------------:|--------------:|------------------:|--------------:|
-| `crypto_kem_keypair` | 1,525,439 | 2,102,051 | 152.5 ms | 210.2 ms |
-| `crypto_kem_enc` | 1,741,553 | 2,387,903 | 174.2 ms | 238.8 ms |
-| `crypto_kem_dec` | 1,959,591 | 2,724,809 | 196.0 ms | 272.5 ms |
+### Results (`-O2`, all parameter sets)
 
-10 MHz is the SoC clock of the Nexys FPGA targets. Both cores run plain
-RV32IM(F)C code: stock GCC can't generate CV32E40P's PULP instructions.
-Keep this in mind when comparing with published figures.
+Cycles:
+
+| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P |
+|---------------|-----------|---------:|-----:|----------------:|
+| Kyber512 (`KYBER_K=2`) | `crypto_kem_keypair` | 926,508 | 1,276,781 | 1.38 |
+| | `crypto_kem_enc` | 1,068,539 | 1,451,933 | 1.36 |
+| | `crypto_kem_dec` | 1,238,966 | 1,707,637 | 1.38 |
+| Kyber768 (`KYBER_K=3`) | `crypto_kem_keypair` | 1,525,556 | 2,102,196 | 1.38 |
+| | `crypto_kem_enc` | 1,741,674 | 2,388,046 | 1.37 |
+| | `crypto_kem_dec` | 1,959,668 | 2,724,962 | 1.39 |
+| Kyber1024 (`KYBER_K=4`) | `crypto_kem_keypair` | 2,386,757 | 3,306,081 | 1.39 |
+| | `crypto_kem_enc` | 2,637,353 | 3,649,998 | 1.38 |
+| | `crypto_kem_dec` | 2,913,387 | 4,074,590 | 1.40 |
+
+Time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
+
+| Parameter set | Operation | CV32E40P | Ibex | Peak stack (both cores) |
+|---------------|-----------|---------:|-----:|------------------------:|
+| Kyber512 | keypair / enc / dec | 92.7 / 106.9 / 123.9 ms | 127.7 / 145.2 / 170.8 ms | 9,908 B |
+| Kyber768 | keypair / enc / dec | 152.6 / 174.2 / 196.0 ms | 210.2 / 238.8 / 272.5 ms | 14,804 B |
+| Kyber1024 | keypair / enc / dec | 238.7 / 263.7 / 291.3 ms | 330.6 / 365.0 / 407.5 ms | 20,916 B |
+
+- All parameter sets fit in the 32 KiB stack (`STACK_SIZE = 0x8000`).
+- Kyber has no rejection loop in signing-like operations, so these counts
+  barely depend on the seed. They do shift slightly (~0.01%) when code or
+  data moves in memory. For example, adding the stack report to
+  `kyber_cycles.c` changed Kyber768 keypair from 1,525,439 to 1,525,556
+  cycles, because of instruction and data alignment effects. Compare
+  configurations built from the same code.
+- Both cores run plain RV32IM(F)C code: stock GCC can't generate CV32E40P's
+  PULP instructions. Keep this in mind when comparing with published
+  figures.
 
 ### Timing other Kyber functions
 
@@ -287,10 +320,12 @@ simulated-time limit. **The stack was only measured for Dilithium2** (52.7
 KiB). Modes 3 and 5 need more: run `dilithium_cycles` for the new mode
 first, since it fails with a clear message if the stack overflows.
 
-**Run `make clean-sw` before changing `DILITHIUM_MODE` or `NTESTS`:**
+Each setting builds into its own directory (e.g.
+`build/sw-<core>/dilithium_cycles-mode3/`), so no clean is needed when
+switching:
 
 ```sh
-make clean-sw && make run TEST=dilithium_cycles DILITHIUM_MODE=3 TIMEOUT_US=8000000
+make run TEST=dilithium_cycles DILITHIUM_MODE=3 TIMEOUT_US=8000000
 ```
 
 ### Results (Dilithium2, `-O2`)
@@ -311,8 +346,9 @@ verification vary only slightly. Published benchmarks usually report the median 
 
 ## Outputs
 
-`build/sw-<core>/<test>/` holds the ELF, the disassembly (`<test>.dis`), the
-memory image, `sim.log` and the optional `waves.fst`.
+`build/sw-<core>/<test>/` (or `<test>-<SW_VARIANT>/`) holds the ELF, the
+disassembly (`<test>.dis`), the memory image, `sim.log` and the optional
+`waves.fst`.
 `build/sim-<core>/` holds the Verilator model.
 
 ## How it works

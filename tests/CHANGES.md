@@ -14,15 +14,21 @@ day-to-day usage, see [README.md](README.md).
 | **Hardware** | No JTAG adapter yet; board not confirmed (Nexys Video or Nexys 4 DDR) |
 | **Open issue** | [The simulator does not rebuild when RTL changes](#open-issue-simulator-does-not-rebuild-when-rtl-changes) |
 
-### Kyber768 cycle counts (headline result)
+### Kyber cycle counts (headline result, current code)
 
-| Operation | CV32E40P | Ibex |
-|---|---:|---:|
-| `crypto_kem_keypair` | 1,525,439 | 2,102,051 |
-| `crypto_kem_enc` | 1,741,553 | 2,387,903 |
-| `crypto_kem_dec` | 1,959,591 | 2,724,809 |
+| Parameter set | Operation | CV32E40P | Ibex |
+|---|---|---:|---:|
+| Kyber512 | `crypto_kem_keypair` | 926,508 | 1,276,781 |
+| | `crypto_kem_enc` | 1,068,539 | 1,451,933 |
+| | `crypto_kem_dec` | 1,238,966 | 1,707,637 |
+| Kyber768 | `crypto_kem_keypair` | 1,525,556 | 2,102,196 |
+| | `crypto_kem_enc` | 1,741,674 | 2,388,046 |
+| | `crypto_kem_dec` | 1,959,668 | 2,724,962 |
+| Kyber1024 | `crypto_kem_keypair` | 2,386,757 | 3,306,081 |
+| | `crypto_kem_enc` | 2,637,353 | 3,649,998 |
+| | `crypto_kem_dec` | 2,913,387 | 4,074,590 |
 
-Details in [Kyber cycle counts](#2026-10-26-kyber-cycle-counts-testskyber_cycles).
+Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4).
 
 ### Dilithium2 cycle counts (headline result)
 
@@ -407,8 +413,11 @@ moving the repo, run `make clean`.
 | `STACK_SIZE` | `0x8000` | 32 KiB |
 | `TIMEOUT_US` | `2000000` | |
 
-> Flag-only changes (`KYBER_K`, `NTESTS`) do not trigger recompilation. Run
-> `make clean-sw` first.
+> ~~Flag-only changes (`KYBER_K`, `NTESTS`) do not trigger recompilation. Run
+> `make clean-sw` first.~~ Superseded: each configuration now has its own
+> build directory (`SW_VARIANT`, see the
+> [Kyber sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4)), so no
+> clean is needed.
 
 ### Result (CV32E40P, `NTESTS=1`)
 
@@ -448,6 +457,75 @@ Kyber768 (`KYBER_K=3`), `-O2`, fixed-seed RNG; deterministic.
   ~15.4M-cycle `kyber_ref` iteration.
 - Both cores run plain RV32IM(F)C code from stock GCC 16; no PULP/XCV
   extensions are used.
+
+---
+
+## 2026-10-26: Kyber parameter sweep (`KYBER_K` = 2, 3, 4)
+
+### Infrastructure: per-configuration build directories (`SW_VARIANT`)
+
+- `tests/Makefile`: `SW_DIR = build/sw-<core>/<test>$(if $(SW_VARIANT),-$(SW_VARIANT))`.
+  A test sets `SW_VARIANT` in its `test.mk` (which the top Makefile already
+  includes).
+
+  | Test | `SW_VARIANT` | Example directory |
+  |---|---|---|
+  | `kyber_ref` | `k$(KYBER_K)-n$(NTESTS)` | `kyber_ref-k3-n1` |
+  | `kyber_cycles` | `k$(KYBER_K)` | `kyber_cycles-k2` |
+  | `dilithium_ref` | `mode$(DILITHIUM_MODE)-n$(NTESTS)` | `dilithium_ref-mode2-n1` |
+  | `dilithium_cycles` | `mode$(DILITHIUM_MODE)` | `dilithium_cycles-mode2` |
+
+- **Effect:** switching `KYBER_K` / `NTESTS` / `DILITHIUM_MODE` no longer
+  needs `make clean-sw` (that caveat is removed from all READMEs), and several
+  configurations can build and run in parallel.
+- Old directories without a suffix (`build/sw-*/kyber_cycles`, etc.) are
+  stale leftovers; `make clean-sw` removes them.
+
+### `kyber_cycles` now reports stack usage
+
+`stack_paint()` before the measurements; it prints `peak stack usage` and
+fails on `stack_overflowed()`, the same as `dilithium_cycles`.
+
+### Results
+
+All six runs PASSED (shared keys match). They ran in parallel; wall times
+were 4–13 min each.
+
+| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
+|---|---|---:|---:|---:|---:|---:|
+| Kyber512 | keypair | 926,508 | 1,276,781 | 1.38 | 92.7 ms | 127.7 ms |
+| | enc | 1,068,539 | 1,451,933 | 1.36 | 106.9 ms | 145.2 ms |
+| | dec | 1,238,966 | 1,707,637 | 1.38 | 123.9 ms | 170.8 ms |
+| Kyber768 | keypair | 1,525,556 | 2,102,196 | 1.38 | 152.6 ms | 210.2 ms |
+| | enc | 1,741,674 | 2,388,046 | 1.37 | 174.2 ms | 238.8 ms |
+| | dec | 1,959,668 | 2,724,962 | 1.39 | 196.0 ms | 272.5 ms |
+| Kyber1024 | keypair | 2,386,757 | 3,306,081 | 1.39 | 238.7 ms | 330.6 ms |
+| | enc | 2,637,353 | 3,649,998 | 1.38 | 263.7 ms | 365.0 ms |
+| | dec | 2,913,387 | 4,074,590 | 1.40 | 291.3 ms | 407.5 ms |
+
+| Parameter set | Peak stack (both cores) | of `STACK_SIZE` |
+|---|---:|---:|
+| Kyber512 | 9,908 B | 32,768 B |
+| Kyber768 | 14,804 B | 32,768 B |
+| Kyber1024 | 20,916 B | 32,768 B |
+
+### Note: layout-dependent drift in cycle counts
+
+The Kyber768 counts differ slightly from the [first `kyber_cycles`
+run](#2026-10-26-kyber-cycle-counts-testskyber_cycles), although the Kyber
+code is unchanged:
+
+| Kyber768 | First run | Now | Δ |
+|---|---:|---:|---:|
+| CV32E40P keypair / enc / dec | 1,525,439 / 1,741,553 / 1,959,591 | 1,525,556 / 1,741,674 / 1,959,668 | +117 / +121 / +77 |
+| Ibex keypair / enc / dec | 2,102,051 / 2,387,903 / 2,724,809 | 2,102,196 / 2,388,046 / 2,724,962 | +145 / +143 / +153 |
+
+What changed in between: `main()` grew (the stack report), and
+`-fno-builtin-fprintf` / `libc_compat.h` were added. This moves the Kyber
+functions and the static buffers to different addresses, and alignment of
+instruction fetches and data accesses costs a few cycles differently. The
+effect is ~0.01%. **Compare numbers produced by the same build of the
+test code**; the "current code" numbers above supersede the first run's.
 
 ---
 
@@ -560,15 +638,19 @@ The frequencies do **not** depend on the core.
 bitstream needs `CORE_TYPE = 1`, set in a copy of that file so upstream
 stays untouched. **Not done yet.**
 
-### Kyber768 time at the Nexys SoC clock (10 MHz)
+### PQC time at the Nexys SoC clock (10 MHz)
 
-Time = cycles / 10 MHz.
+Time = cycles / 10 MHz. The cycle counts are in the
+[Kyber sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4) and
+[Dilithium](#2026-10-26-dilithium-ml-dsa-testsdilithium_ref-and-testsdilithium_cycles)
+sections.
 
-| Operation | CV32E40P | Ibex |
-|---|---:|---:|
-| `crypto_kem_keypair` | 152.5 ms | 210.2 ms |
-| `crypto_kem_enc` | 174.2 ms | 238.8 ms |
-| `crypto_kem_dec` | 196.0 ms | 272.5 ms |
+| Algorithm | Operation | CV32E40P | Ibex |
+|---|---|---:|---:|
+| Kyber512 | keypair / enc / dec | 92.7 / 106.9 / 123.9 ms | 127.7 / 145.2 / 170.8 ms |
+| Kyber768 | keypair / enc / dec | 152.6 / 174.2 / 196.0 ms | 210.2 / 238.8 / 272.5 ms |
+| Kyber1024 | keypair / enc / dec | 238.7 / 263.7 / 291.3 ms | 330.6 / 365.0 / 407.5 ms |
+| Dilithium2 | keypair / sign / open | 330.7 / 2,218.6 / 358.2 ms | 447.1 / 2,790.3 / 477.0 ms |
 
 At the simulator's 50 MHz the times are 5× shorter. The cycle counts are
 identical; only peripheral-bound code depends on the SoC:peripheral clock

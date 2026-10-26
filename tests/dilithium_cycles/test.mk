@@ -7,6 +7,8 @@ PULP_APP_CFLAGS += -I$(DILITHIUM_DIR)
 # Dilithium parameter set: 2, 3 or 5 (Dilithium2 / 3 / 5)
 DILITHIUM_MODE ?= 2
 PULP_APP_CFLAGS += -DDILITHIUM_MODE=$(DILITHIUM_MODE)
+# Separate build directory per configuration (see tests/Makefile)
+SW_VARIANT = mode$(DILITHIUM_MODE)
 
 # See dilithium_ref/test.mk
 STACK_SIZE = 0x20000

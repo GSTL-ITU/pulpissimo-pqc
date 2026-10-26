@@ -4,6 +4,8 @@ DILITHIUM_MODE ?= 2
 NTESTS ?= 1
 
 PULP_APP_CFLAGS += -DDILITHIUM_MODE=$(DILITHIUM_MODE) -DNTESTS=$(NTESTS)
+# Separate build directory per configuration (see tests/Makefile)
+SW_VARIANT = mode$(DILITHIUM_MODE)-n$(NTESTS)
 
 # The reference code keeps the public matrix and other polynomial vectors on
 # the stack. Sized from the peak usage measured by dilithium_cycles; see

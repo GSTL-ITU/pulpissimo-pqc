@@ -114,7 +114,10 @@ hw: $(SIM_BIN)
 # Software #
 ############
 
-SW_DIR = $(BUILD_DIR)/sw-$(CORE)/$(TEST)
+# A test.mk can set SW_VARIANT (e.g. `k$(KYBER_K)`) so each configuration gets
+# its own build directory: switching configurations then needs no clean, and
+# several configurations can be built and run in parallel.
+SW_DIR = $(BUILD_DIR)/sw-$(CORE)/$(TEST)$(if $(SW_VARIANT),-$(SW_VARIANT))
 ELF    = $(SW_DIR)/$(TEST)/$(TEST)
 MEM    = $(SW_DIR)/$(TEST).mem
 

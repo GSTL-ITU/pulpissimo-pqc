@@ -4,6 +4,8 @@ KYBER_K ?= 3
 NTESTS  ?= 1
 
 PULP_APP_CFLAGS += -DKYBER_K=$(KYBER_K) -DNTESTS=$(NTESTS)
+# Separate build directory per configuration (see tests/Makefile)
+SW_VARIANT = k$(KYBER_K)-n$(NTESTS)
 
 # Keys, ciphertexts and polynomial vectors live on the stack
 STACK_SIZE = 0x8000

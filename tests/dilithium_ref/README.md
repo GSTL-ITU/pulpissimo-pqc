@@ -31,9 +31,9 @@ Changed:
 | `TIMEOUT_US` | `4000000` | Simulated-time limit |
 
 Override them on the command line, e.g.
-`make run TEST=dilithium_ref DILITHIUM_MODE=3`. Objects are not rebuilt when
-only flags change, so run `make clean-sw` first when switching
-`DILITHIUM_MODE` or `NTESTS`.
+`make run TEST=dilithium_ref DILITHIUM_MODE=3`. Each combination builds into
+its own directory (`build/sw-<core>/dilithium_ref-mode<M>-n<NTESTS>/`, via
+`SW_VARIANT`), so no clean is needed when switching.
 
 The stack size was only measured for Dilithium2. Modes 3 and 5 use larger
 matrices and need more stack. Run `dilithium_cycles` with the same mode

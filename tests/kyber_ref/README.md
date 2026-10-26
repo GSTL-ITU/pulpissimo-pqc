@@ -30,8 +30,9 @@ Changed:
 | `TIMEOUT_US` | `2000000` | Simulated-time limit |
 
 Override them on the command line, e.g. `make run TEST=kyber_ref KYBER_K=2`.
-Objects are not rebuilt when only flags change, so run `make clean-sw` first
-when switching `KYBER_K` or `NTESTS`.
+Each combination builds into its own directory
+(`build/sw-<core>/kyber_ref-k<K>-n<NTESTS>/`, via `SW_VARIANT`), so no clean
+is needed when switching.
 
 ## Pass criteria
 
