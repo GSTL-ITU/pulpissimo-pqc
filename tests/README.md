@@ -56,9 +56,13 @@ Options:
 | `cycle_count` | Example of timing one function call with `cycles.h` | ~2 s |
 | `kyber_ref` | Upstream Kyber functional test (`test_kyber.c`), see [Kyber](#kyber-ml-kem) | ~13 min |
 | `kyber_cycles` | Cycle counts of Kyber keypair / encapsulation / decapsulation | ~4.5 min |
+| `dilithium_ref` | Upstream Dilithium functional test (`test_dilithium.c`), see [Dilithium](#dilithium-ml-dsa) | ~28 min |
+| `dilithium_cycles` | Cycle counts of Dilithium keypair / sign / verify, plus peak stack usage | ~25 min |
 
-Ibex takes about 1.5–2x longer in wall time. `make all-tests` runs everything, so
-expect it to take about 20 minutes because of the Kyber tests.
+Ibex takes about 1.5–2x longer in wall time. `make all-tests` runs
+everything, so expect it to take **well over an hour** because of the PQC
+tests. To run only specific tests, call `make run TEST=...` for each, in
+parallel shells if you like (each simulation uses one CPU core).
 
 ## Adding a test
 
@@ -99,7 +103,8 @@ After changing only flags (in `test.mk` or on the command line), run
 
 pulp-runtime headers (`pulp.h`, HAL, drivers) are on the include path. See
 `sw/pulp-runtime` and `sw/regression_tests` for examples of peripheral access.
-`memcmp`, `memcpy`, `memset` and `memmove` are available.
+`memcmp`, `memcpy`, `memset`, `memmove`, `snprintf` and `fprintf` are
+available (`stdout` and `stderr` both print to the same output).
 
 ## Measuring cycles
 
@@ -132,6 +137,25 @@ no `%llu`, so use `cycles_print()` for 64-bit counts.
 Counts are in SoC clock cycles: 50 MHz in this simulator, 10 MHz on the
 Nexys FPGA targets. They are identical between simulation and hardware for
 code that only uses the core and memory.
+
+## Measuring stack usage
+
+`env/include/stack.h` measures peak stack usage by filling the free stack
+with a pattern and checking later how much of it was overwritten:
+
+```c
+#include "stack.h"
+
+stack_paint();                   // before the code; not inside a cycle measurement
+my_function();
+printf("peak stack: %u of %u bytes\n",
+       (unsigned)stack_max_used(), (unsigned)stack_size());
+if (stack_overflowed())          // STACK_SIZE in test.mk is too small
+    return 1;
+```
+
+The result includes `main()`'s own frame. Use it to choose `STACK_SIZE` for
+a test. `dilithium_cycles` is an example.
 
 ## Kyber (ML-KEM)
 
@@ -211,6 +235,80 @@ between two `cycles_read()` calls. The headers map names to Kyber's
 namespaced symbols, so the plain names work. Print only after all
 measurements are done.
 
+## Dilithium (ML-DSA)
+
+Two tests run the CRYSTALS-Dilithium reference implementation
+([pq-crystals/dilithium](https://github.com/pq-crystals/dilithium), folder
+`ref/`), set up the same way as Kyber:
+
+| Test | Purpose |
+|------|---------|
+| `dilithium_ref` | Upstream functional test: sign and verify a message, check lengths and message, and check that a modified signed message fails verification |
+| `dilithium_cycles` | Measures `crypto_sign_keypair`, `crypto_sign` and `crypto_sign_open` separately, prints the cycle counts and peak stack usage |
+
+The Dilithium code exists once, in `dilithium_ref/`, and `dilithium_cycles`
+compiles it from there. Changes are listed in
+[dilithium_ref/README.md](dilithium_ref/README.md). `randombytes()` is the
+same fixed-seed generator as for Kyber (not secure; testing only). The
+message (59 bytes) and context (14 bytes) match the upstream test.
+
+```sh
+make run TEST=dilithium_cycles             # Dilithium2 on CV32E40P, ~25 min
+make run TEST=dilithium_cycles CORE=ibex   # ~39 min
+make run TEST=dilithium_ref                # functional test, ~28 min
+```
+
+Example output of `dilithium_cycles`:
+
+```
+[STDOUT-CL31_PE0, 585295.830 us] Dilithium2
+[STDOUT-CL31_PE0, 585340.330 us] crypto_sign_keypair: 3307132 cycles
+[STDOUT-CL31_PE0, 585385.650 us] crypto_sign        : 22185892 cycles
+[STDOUT-CL31_PE0, 585430.230 us] crypto_sign_open   : 3582361 cycles
+[STDOUT-CL31_PE0, 585478.090 us] measurement overhead (subtracted): 13 cycles
+[STDOUT-CL31_PE0, 588289.750 us] peak stack usage: 52692 of 131072 bytes
+[STDOUT-CL31_PE0, 588305.990 us] signature verified
+[TB] 588307.070 us: PASSED (exit code 0)
+```
+
+The test fails if verification fails or the stack overflowed, so a printed
+count always belongs to a correct run.
+
+### Options
+
+| Variable | Default | Tests | Meaning |
+|----------|---------|-------|---------|
+| `DILITHIUM_MODE` | `2` | both | Parameter set: `2` = Dilithium2, `3` = Dilithium3, `5` = Dilithium5 |
+| `NTESTS` | `1` | `dilithium_ref` | Iterations. Upstream uses 10000; each iteration takes ~28 min here. |
+| `CORE` | `cv32e40p` | both | `cv32e40p` or `ibex` |
+
+Both tests use a 128 KiB stack (`STACK_SIZE = 0x20000`) and a 4 s
+simulated-time limit. **The stack was only measured for Dilithium2** (52.7
+KiB). Modes 3 and 5 need more: run `dilithium_cycles` for the new mode
+first, since it fails with a clear message if the stack overflows.
+
+**Run `make clean-sw` before changing `DILITHIUM_MODE` or `NTESTS`:**
+
+```sh
+make clean-sw && make run TEST=dilithium_cycles DILITHIUM_MODE=3 TIMEOUT_US=8000000
+```
+
+### Results (Dilithium2, `-O2`)
+
+| Operation | CV32E40P (cycles) | Ibex (cycles) | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
+|-----------|------------------:|--------------:|------------------:|--------------:|
+| `crypto_sign_keypair` | 3,307,132 | 4,470,567 | 330.7 ms | 447.1 ms |
+| `crypto_sign` | 22,185,892 | 27,902,534 | 2,218.6 ms | 2,790.3 ms |
+| `crypto_sign_open` | 3,582,361 | 4,769,927 | 358.2 ms | 477.0 ms |
+| Peak stack | 52,692 B | 52,692 B | | |
+
+**Signing time varies with the input.** Dilithium signing repeats an inner
+loop until a candidate signature passes its checks (rejection sampling), and
+the number of repetitions depends on the key, message and randomness. The
+count above is one sample for the fixed seed. A different seed or message
+gives a different signing count, often by a large factor. Key generation and
+verification vary only slightly. Published benchmarks usually report the median over many runs.
+
 ## Outputs
 
 `build/sw-<core>/<test>/` holds the ELF, the disassembly (`<test>.dis`), the
@@ -244,7 +342,10 @@ Workarounds applied by the Makefile (originals untouched):
 - pulp-runtime's linker script is regenerated in `build/ld/` with a
   configurable stack size (the original fixes it at 2 KiB).
 - `env/include/libc_compat.h` is force-included in every test. It declares
-  `memcmp`, which the runtime implements but its `string.h` omits.
+  `memcmp`, `fprintf` and `snprintf`, which the runtime implements but its
+  headers omit. Tests are also compiled with `-fno-builtin-fprintf`, because
+  GCC otherwise turns some `fprintf` calls into `fwrite`, which the runtime
+  lacks.
 
 The full history of what was changed and why is in [CHANGES.md](CHANGES.md).
 

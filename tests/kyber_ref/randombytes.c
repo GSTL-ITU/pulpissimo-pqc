@@ -1,5 +1,5 @@
 /*
- * Replacement for kyber/ref/randombytes.c, which needs an OS (getrandom,
+ * Replacement for the upstream ref/randombytes.c, which needs an OS (getrandom,
  * /dev/urandom). This is a deterministic xorshift32 PRNG with a fixed seed:
  * every run produces the same keys, which keeps simulation results and cycle
  * counts reproducible.

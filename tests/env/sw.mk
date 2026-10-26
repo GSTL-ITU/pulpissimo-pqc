@@ -42,6 +42,9 @@ PULP_APP_ASM_SRCS = $(wildcard *.S)
 PULP_CFLAGS      += -O2 -g
 # Shared test helpers, e.g. #include "cycles.h"
 PULP_APP_CFLAGS  += -I$(ENV_DIR)include -include $(ENV_DIR)include/libc_compat.h
+# GCC rewrites fprintf(f, "constant") into fwrite(), which the minimal libc
+# lacks
+PULP_APP_CFLAGS  += -fno-builtin-fprintf
 
 # Stack size in bytes; tests that need more set it in test.mk
 STACK_SIZE ?= 0x800

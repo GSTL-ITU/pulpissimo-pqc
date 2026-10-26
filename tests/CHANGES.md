@@ -8,9 +8,9 @@ day-to-day usage, see [README.md](README.md).
 | | |
 |---|---|
 | **Repo** | `/home/baris/gstl/pulpissimo-pqc` (a copy of `/home/baris/gstl/pulpissimo`) |
-| **Constraint** | Do **not** modify upstream/tracked code. Everything lives in `tests/`. Exceptions, both at the user's request: `/kyber/` in the root `.gitignore`, and a note at the top of the root `README.md` pointing to `tests/` (the rest of that README is unchanged). |
+| **Constraint** | Do **not** modify upstream/tracked code. Everything lives in `tests/`. Exceptions, all at the user's request: `/kyber/` and `/dilithium/` in the root `.gitignore` (the user prefers the root-anchored form), and a note at the top of the root `README.md` pointing to `tests/` (the rest of that README is unchanged). |
 | **Simulator** | Verilator, both cores (`CORE=cv32e40p` default, `CORE=ibex`) |
-| **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles` |
+| **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles`, `dilithium_ref`, `dilithium_cycles` |
 | **Hardware** | No JTAG adapter yet; board not confirmed (Nexys Video or Nexys 4 DDR) |
 | **Open issue** | [The simulator does not rebuild when RTL changes](#open-issue-simulator-does-not-rebuild-when-rtl-changes) |
 
@@ -23,6 +23,17 @@ day-to-day usage, see [README.md](README.md).
 | `crypto_kem_dec` | 1,959,591 | 2,724,809 |
 
 Details in [Kyber cycle counts](#2026-10-26-kyber-cycle-counts-testskyber_cycles).
+
+### Dilithium2 cycle counts (headline result)
+
+| Operation | CV32E40P | Ibex |
+|---|---:|---:|
+| `crypto_sign_keypair` | 3,307,132 | 4,470,567 |
+| `crypto_sign` | 22,185,892 | 27,902,534 |
+| `crypto_sign_open` | 3,582,361 | 4,769,927 |
+| Peak stack | 52,692 B | 52,692 B |
+
+Details in [Dilithium](#2026-10-26-dilithium-ml-dsa-testsdilithium_ref-and-testsdilithium_cycles).
 
 ---
 
@@ -437,6 +448,73 @@ Kyber768 (`KYBER_K=3`), `-O2`, fixed-seed RNG; deterministic.
   ~15.4M-cycle `kyber_ref` iteration.
 - Both cores run plain RV32IM(F)C code from stock GCC 16; no PULP/XCV
   extensions are used.
+
+---
+
+## 2026-10-26: Dilithium (ML-DSA): `tests/dilithium_ref` and `tests/dilithium_cycles`
+
+Set up exactly like Kyber: one copy of the code in `dilithium_ref/`, and a
+separate cycles test that compiles it from there.
+
+### Source
+
+- https://github.com/pq-crystals/dilithium, commit `d35ba3fe`, folder
+  `ref/`.
+- Cloned to `<repo>/dilithium/`, added to the root `.gitignore` as
+  `/dilithium/`. (The user tried `kyber/` for the VS Code grey-out but kept
+  `/kyber/`, so both use the root-anchored form. `./kyber` does **not**
+  work in `.gitignore`; this was tested.)
+- The needed `ref/` files are copied unchanged. Modifications are documented
+  in [dilithium_ref/README.md](dilithium_ref/README.md):
+
+| File | Change |
+|---|---|
+| `test_dilithium.c` (from `ref/test/`) | Include paths; `NTESTS` (upstream 10000) wrapped in `#ifndef` |
+| `randombytes.c` | Same fixed-seed xorshift32 PRNG as `kyber_ref` (the header comment of both now says "upstream ref/randombytes.c") |
+
+### Infrastructure changes (apply to all tests)
+
+| Change | Details |
+|---|---|
+| **`libc_compat.h`** | Now also includes `<stdio.h>` and declares `fprintf` and `snprintf`. The minimal libc implements them (`fprintf.c`, `sprintf.c`) but `stdio.h` doesn't declare them. `stderr` is `(FILE*)3` and prints to the same output as stdout. |
+| **`-fno-builtin-fprintf`** | Added in `sw.mk`. GCC rewrites `fprintf(stderr, "constant\n")` into `fwrite()`, which the minimal libc lacks (link error). |
+| **`env/include/stack.h`** | New. Stack painting: `stack_paint()`, `stack_max_used()`, `stack_size()`, `stack_overflowed()`. Uses the linker symbols `stack_start` / `stack`. The result includes `main()`'s frame. |
+
+### Settings
+
+| Variable | Value | Notes |
+|---|---|---|
+| `DILITHIUM_MODE` | `2` | Upstream default (2, 3 or 5) |
+| `NTESTS` | `1` | `dilithium_ref` only |
+| `STACK_SIZE` | `0x20000` (128 KiB) | Measured peak for Dilithium2 in `dilithium_cycles`: 52,692 B. `dilithium_ref` adds ~11 KiB of arrays on its own stack (m, m2, sm, pk, sk). **Modes 3/5 are not measured**; `dilithium_cycles` fails with a message on overflow, `dilithium_ref` has no such check. |
+| `TIMEOUT_US` | `4000000` | Dilithium2 needs ~0.6 s simulated; larger modes need more |
+
+`dilithium_cycles` measures the API calls used by the upstream test:
+`crypto_sign_keypair`, `crypto_sign` (= `crypto_sign_signature` plus a copy
+of the message) and `crypto_sign_open` (= `crypto_sign_verify` plus a copy).
+All buffers are `static`; message and context are the same as in
+`test_dilithium.c`. It fails on verification failure or stack overflow.
+
+### Results
+
+Dilithium2, `-O2`, fixed-seed RNG; deterministic.
+
+| Operation | CV32E40P | Ibex | CV32E40P @ 10 MHz | Ibex @ 10 MHz |
+|---|---:|---:|---:|---:|
+| `crypto_sign_keypair` | 3,307,132 | 4,470,567 | 330.7 ms | 447.1 ms |
+| `crypto_sign` | 22,185,892 | 27,902,534 | 2,218.6 ms | 2,790.3 ms |
+| `crypto_sign_open` | 3,582,361 | 4,769,927 | 358.2 ms | 477.0 ms |
+| Overhead (subtracted) | 13 | 4 | | |
+| Peak stack | 52,692 B | 52,692 B | | |
+| Wall time | 25 min | 39 min | | |
+
+- `dilithium_ref` (CV32E40P, `NTESTS=1`): **PASSED**, printed pk 1312,
+  sk 2560, signature 2420 bytes (correct for Dilithium2). Wall time 28.5 min.
+  Not yet run on Ibex.
+- **Signing varies with the input** (rejection sampling). The count is one
+  sample for the fixed seed; benchmarks usually report a median over many
+  runs. Not done here: each Dilithium2 signature takes ~18 min of wall time.
+- `make all-tests` now takes well over an hour.
 
 ---
 

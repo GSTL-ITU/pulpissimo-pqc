@@ -3,8 +3,8 @@
 > **Verilator simulation and PQC tests:** this repository adds a Verilator
 > test environment in [`tests/`](tests/), which upstream PULPissimo does not
 > support. It runs C programs on the full SoC RTL on both cores (CV32E40P and
-> Ibex), with cycle counting and post-quantum cryptography tests such as
-> CRYSTALS-Kyber (ML-KEM).
+> Ibex), with cycle counting and post-quantum cryptography tests for
+> CRYSTALS-Kyber (ML-KEM) and CRYSTALS-Dilithium (ML-DSA).
 >
 > ```sh
 > cd tests

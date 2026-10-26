@@ -13,3 +13,6 @@ working_dir/
 
 # Upstream Kyber clone (sources used by tests/kyber_ref are copied there)
 /kyber/
+
+# Upstream Dilithium clone (sources used by tests/dilithium_ref are copied there)
+/dilithium/
