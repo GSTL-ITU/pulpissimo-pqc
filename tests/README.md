@@ -367,12 +367,33 @@ signing count is a single sample, and the number of loop repetitions
 differs between the modes. Don't compare signing cost between modes from
 these numbers. The same layout drift as for Kyber (~0.01%) applies.
 
+## FPGA area
+
+`fpga/` synthesizes PULPissimo for the Nexys 4 DDR (XC7A100T) with Vivado and
+reports LUTs, FFs, BRAM and DSPs for the core, the FPU and each SoC block:
+
+```sh
+cd fpga
+make area              # CV32E40P with FPU, ~9 min
+make area CORE=ibex
+```
+
+| | CV32E40P | Ibex |
+|---|---:|---:|
+| Whole design (LUTs / FFs / BRAM / DSPs) | 42,830 / 22,339 / 82 / 12 | 34,883 / 20,684 / 82 / 4 |
+| Core | 7,418 / 2,660 / 0 / 7 | 3,280 / 1,387 / 0 / 1 |
+| FPU | 3,723 / 382 / 0 / 2 | – |
+| SoC without core and FPU | 31,689 / 19,297 / 82 / 3 | 31,603 / 19,297 / 82 / 3 |
+
+Details, options and how it differs from the upstream FPGA flow:
+[fpga/README.md](fpga/README.md).
+
 ## Outputs
 
 `build/sw-<core>/<test>/` (or `<test>-<SW_VARIANT>/`) holds the ELF, the
 disassembly (`<test>.dis`), the memory image, `sim.log` and the optional
 `waves.fst`.
-`build/sim-<core>/` holds the Verilator model.
+`build/sim-<core>/` holds the Verilator model, `build/fpga/` the FPGA area builds.
 
 ## How it works
 

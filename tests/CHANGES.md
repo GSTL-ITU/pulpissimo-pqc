@@ -12,6 +12,7 @@ day-to-day usage, see [README.md](README.md).
 | **Simulator** | Verilator, both cores (`CORE=cv32e40p` default, `CORE=ibex`) |
 | **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles`, `dilithium_ref`, `dilithium_cycles` |
 | **Hardware** | No JTAG adapter yet; board not confirmed (Nexys Video or Nexys 4 DDR) |
+| **FPGA area** | `tests/fpga/`: Vivado synthesis for the Nexys 4 DDR (XC7A100T), `make area [CORE=ibex]`, see [fpga/README.md](fpga/README.md) |
 | **Open issue** | [The simulator does not rebuild when RTL changes](#open-issue-simulator-does-not-rebuild-when-rtl-changes) |
 
 ### Kyber cycle counts (headline result, current code)
@@ -29,6 +30,17 @@ day-to-day usage, see [README.md](README.md).
 | | `crypto_kem_dec` | 2,913,387 | 4,074,590 |
 
 Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4).
+
+### FPGA area, Nexys 4 DDR (headline result, post-`opt_design`)
+
+| | CV32E40P (LUTs / FFs / BRAM / DSPs) | Ibex |
+|---|---:|---:|
+| Whole design | 42,830 / 22,339 / 82 / 12 | 34,883 / 20,684 / 82 / 4 |
+| Core | 7,418 / 2,660 / 0 / 7 | 3,280 / 1,387 / 0 / 1 |
+| FPU | 3,723 / 382 / 0 / 2 | – |
+| SoC without core and FPU | 31,689 / 19,297 / 82 / 3 | 31,603 / 19,297 / 82 / 3 |
+
+Details in [FPGA area](#2026-10-27-fpga-area-testsfpga).
 
 ### Dilithium cycle counts (headline result)
 
@@ -651,6 +663,59 @@ repetitions for this fixed seed and message differs between the modes. The
 signing numbers are not a fair comparison between modes. That would need the
 median over many seeds, which is too slow in RTL simulation (~20–30 min of
 wall time per signature).
+
+---
+
+## 2026-10-27: FPGA area: `tests/fpga`
+
+The user wanted area numbers for PULPissimo on the FPGA, like
+`~/gstl/ibex-pqc/fpga` (Vivado synthesis for the Nexys 4 DDR, core vs SoC
+table). `tests/fpga/` does the same for PULPissimo; usage, results and all
+details are in [fpga/README.md](fpga/README.md). Builds go to
+`tests/build/fpga/<core>/` (`area.md`, Vivado reports).
+
+### Why not the upstream flow (`target/fpga`)
+
+- It writes its project, IPs and `pulpissimo/tcl/generated/compile.tcl` into
+  `target/` and always builds a full bitstream.
+- It hard-codes `CORE_TYPE=0` (CV32E40P with FPU) as localparams.
+- It's broken with the current Bender: the adv_dbg_if manifest typo makes
+  `bender script vivado` fail (same as for Verilator).
+
+### What `tests/fpga` does differently
+
+| Item | Details |
+|---|---|
+| Top level | `sed` copy of `xilinx_pulpissimo.v` in the build directory with `CORE_TYPE`/`USE_FPU` as parameters; set via the fileset `generic` |
+| Clock IPs | Created inside the project (`create_ip clk_wiz`) with the upstream settings, not in `target/.../ips` |
+| Defines | Upstream's plus Bender's `TARGET_FPGA TARGET_XILINX TARGET_SYNTHESIS TARGET_VIVADO`. Bender 0.31 puts those on the **simulation** fileset only, so the upstream flow never sees them; `TARGET_FPGA` selects Ibex's FPGA register file. |
+| `XPM_LIBRARIES` | Must be set by hand: with `-sfcu`, Vivado doesn't detect `xpm_memory_spram` in `tc_sram_xilinx.sv` (error `module 'xpm_memory_spram' not found`) |
+| Flow | synthesis (`-flatten_hierarchy none -sfcu`, as upstream), upstream's pad tie-offs, `opt_design`, `report_utilization -hierarchical`; `IMPL=1` adds place & route and timing |
+| Summary | `scripts/area_summary.py`, adapted from ibex-pqc: core (`cv32e40p_core`/`ibex_core`), FPU (`cv32e40p_fp_wrapper`), SoC blocks grouped by module name, with the rest as "glue" |
+
+### Results
+
+See the headline table above. Run time ~9 min per core (8 threads), ~4 GB
+of memory. The SoC part is the same for both cores to within 0.3%.
+
+### Facts learned
+
+- **CV32E40P has no FP register file here**: PULPissimo sets
+  `USE_ZFINX=1` (`pulpissimo.sv`, `soc_domain.sv`, `pulp_soc.sv`,
+  `fc_subsystem.sv`), so FP values live in the integer registers (992 FFs =
+  31 × 32 bits). The tests compile with `-march=rv32imfc`, which assumes
+  F registers, but none of the test binaries contains an FP instruction
+  (checked in the `.dis` files), so the cycle results are unaffected.
+  A test that uses `float` would need `-march=rv32im_zfinx` or soft-float.
+- PULPissimo's Ibex (`fc_subsystem.sv`): RV32IMC, `RV32MFast`, 10 HPM
+  counters, debug triggers, no PMP, FPGA register file. The same
+  configuration as the ibex-pqc demo system (3,311 LUTs there, 3,280 here).
+- About 15 critical warnings from upstream's `nexys4DDR.xdc`, which refers to
+  outdated instance names (`i_pulp_soc_i`, ...). They only affect timing
+  constraints.
+- The 80 BRAM of L2 = 320 KiB (4 interleaved banks of 64 KiB, 2 private
+  banks of 32 KiB). The XC7A100T has 135 BRAM, so L2 can't double on this
+  FPGA.
 
 ---
 
