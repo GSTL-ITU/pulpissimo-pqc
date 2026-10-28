@@ -55,9 +55,9 @@ Options:
 | `l2_preload` | Checks that a 96 KiB table loaded into all L2 regions reads back correctly | ~15 s |
 | `cycle_count` | Example of timing one function call with `cycles.h` | ~2 s |
 | `kyber_ref` | Upstream Kyber functional test (`test_kyber.c`), see [Kyber](#kyber-ml-kem) | ~13 min |
-| `kyber_cycles` | Cycle counts of Kyber keypair / encapsulation / decapsulation | ~4.5 min |
+| `kyber_cycles` | Cycle counts of Kyber keypair / encapsulation / decapsulation | ~4.5 min per iteration (`NTESTS`) |
 | `dilithium_ref` | Upstream Dilithium functional test (`test_dilithium.c`), see [Dilithium](#dilithium-ml-dsa) | ~28 min |
-| `dilithium_cycles` | Cycle counts of Dilithium keypair / sign / verify, plus peak stack usage | ~25 min (Dilithium2), ~40 min (Dilithium5) |
+| `dilithium_cycles` | Cycle counts of Dilithium keypair / sign / verify, plus peak stack usage | ~25 min (Dilithium2), ~40 min (Dilithium5) per iteration (`NTESTS`) |
 
 Ibex takes about 1.5–2x longer in wall time. `make all-tests` runs
 everything, so expect it to take **well over an hour** because of the PQC
@@ -137,6 +137,7 @@ no `%llu`, so use `cycles_print()` for 64-bit counts.
 | `cycles_read()` | Current 64-bit cycle count |
 | `cycles_overhead()` | Cycles taken by the reads themselves (CV32E40P: 13, Ibex: 4). Subtract it from each measurement. |
 | `cycles_print(label, n)` | Prints `label: n cycles` |
+| `cycles_print_stats(label, c, n)` | Prints min, median and max of the `n` counts in `c` (sorts `c`) |
 
 Counts are in SoC clock cycles: 50 MHz in this simulator, 10 MHz on the
 Nexys FPGA targets. They are identical between simulation and hardware for
@@ -205,15 +206,15 @@ belongs to a correct run.
 | Variable | Default | Tests | Meaning |
 |----------|---------|-------|---------|
 | `KYBER_K` | `3` | both | Parameter set: `2` = Kyber512, `3` = Kyber768, `4` = Kyber1024 |
-| `NTESTS` | `1` | `kyber_ref` | Iterations of the three checks. Upstream uses 1000; each iteration takes ~13 min here. |
+| `NTESTS` | `1` | both | Iterations. `kyber_ref`: of the three checks (upstream uses 1000; each takes ~13 min here). `kyber_cycles`: of the three measurements, each with new keys (see below). |
 | `CORE` | `cv32e40p` | both | `cv32e40p` or `ibex` |
 
 Kyber needs a 32 KiB stack (`STACK_SIZE = 0x8000` in both `test.mk` files),
-and its timeout is 2 s of simulated time. Larger parameter sets take
+and its timeout is 2 s of simulated time (`kyber_cycles`: per iteration). Larger parameter sets take
 proportionally longer; if a run hits the timeout, add `TIMEOUT_US=5000000`.
 
 Each setting builds into its own directory
-(`build/sw-<core>/kyber_cycles-k2/`, `kyber_ref-k3-n1/`, ...), so you can
+(`build/sw-<core>/kyber_cycles-k2/`, `kyber_cycles-k2-n5/`, `kyber_ref-k3-n1/`, ...), so you can
 switch without cleaning and run several in parallel shells:
 
 ```sh
@@ -224,37 +225,72 @@ make run TEST=kyber_cycles KYBER_K=4   # Kyber1024
 `kyber_cycles` also prints peak stack usage and fails if the stack
 overflowed.
 
-### Results (`-O2`, all parameter sets)
+### Several iterations (`NTESTS`)
 
-Cycles:
+`make run TEST=kyber_cycles NTESTS=5` repeats keypair / enc / dec five
+times. Each iteration continues the pseudorandom stream, so it gets new keys
+and new encapsulation randomness, the same as a different seed. Iteration 1
+uses the fixed seed of an `NTESTS=1` run. The test prints the counts of each
+iteration, then min, median and max:
 
-| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P |
-|---------------|-----------|---------:|-----:|----------------:|
-| Kyber512 (`KYBER_K=2`) | `crypto_kem_keypair` | 926,508 | 1,276,781 | 1.38 |
-| | `crypto_kem_enc` | 1,068,539 | 1,451,933 | 1.36 |
-| | `crypto_kem_dec` | 1,238,966 | 1,707,637 | 1.38 |
-| Kyber768 (`KYBER_K=3`) | `crypto_kem_keypair` | 1,525,556 | 2,102,196 | 1.38 |
-| | `crypto_kem_enc` | 1,741,674 | 2,388,046 | 1.37 |
-| | `crypto_kem_dec` | 1,959,668 | 2,724,962 | 1.39 |
-| Kyber1024 (`KYBER_K=4`) | `crypto_kem_keypair` | 2,386,757 | 3,306,081 | 1.39 |
-| | `crypto_kem_enc` | 2,637,353 | 3,649,998 | 1.38 |
-| | `crypto_kem_dec` | 2,913,387 | 4,074,590 | 1.40 |
+```
+Kyber512
+iteration 1
+crypto_kem_keypair: 926554 cycles
+...
+iteration 5
+...
+over 5 iterations
+crypto_kem_keypair: min 926184, median 926554, max 948783 cycles
+crypto_kem_enc    : min 1068216, median 1068586, max 1090817 cycles
+crypto_kem_dec    : min 1238771, median 1239141, max 1261369 cycles
+```
 
-Time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
+The test fails if the shared keys differ in any iteration.
+`env/cycles_table.py` turns the logs into the results table below:
+
+```sh
+python3 env/cycles_table.py build/sw-*/kyber_cycles-k*-n5/sim.log
+```
+
+### Results (`-O2`, all parameter sets, `NTESTS=5`)
+
+Cycles. **1 seed** is iteration 1 (the fixed seed); median and min – max are
+over the 5 iterations:
+
+| Parameter set | Operation | CV32E40P 1 seed | median | min – max | Ibex 1 seed | median | min – max |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Kyber512 (n = 5) | `crypto_kem_keypair` | 926,554 | 926,554 | 926,184 – 948,783 | 1,276,851 | 1,276,851 | 1,276,431 – 1,309,431 |
+|  | `crypto_kem_enc` | 1,068,586 | 1,068,586 | 1,068,216 – 1,090,817 | 1,452,007 | 1,452,007 | 1,451,586 – 1,484,586 |
+|  | `crypto_kem_dec` | 1,239,141 | 1,239,141 | 1,238,771 – 1,261,369 | 1,707,845 | 1,707,845 | 1,707,424 – 1,740,424 |
+| Kyber768 (n = 5) | `crypto_kem_keypair` | 1,525,614 | 1,526,011 | 1,525,231 – 1,526,232 | 2,102,266 | 2,102,725 | 2,101,854 – 2,102,907 |
+|  | `crypto_kem_enc` | 1,741,732 | 1,742,133 | 1,741,353 – 1,742,351 | 2,388,120 | 2,388,578 | 2,387,707 – 2,388,760 |
+|  | `crypto_kem_dec` | 1,959,706 | 1,960,106 | 1,959,327 – 1,960,320 | 2,725,040 | 2,725,498 | 2,724,627 – 2,725,680 |
+| Kyber1024 (n = 5) | `crypto_kem_keypair` | 2,386,803 | 2,387,592 | 2,386,654 – 2,409,207 | 3,306,151 | 3,306,950 | 3,305,971 – 3,338,955 |
+|  | `crypto_kem_enc` | 2,637,400 | 2,638,184 | 2,637,247 – 2,659,801 | 3,650,072 | 3,650,870 | 3,649,891 – 3,682,875 |
+|  | `crypto_kem_dec` | 2,913,431 | 2,914,217 | 2,913,282 – 2,935,833 | 4,074,617 | 4,075,415 | 4,074,436 – 4,107,420 |
+
+Median time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
 
 | Parameter set | Operation | CV32E40P | Ibex | Peak stack (both cores) |
 |---------------|-----------|---------:|-----:|------------------------:|
-| Kyber512 | keypair / enc / dec | 92.7 / 106.9 / 123.9 ms | 127.7 / 145.2 / 170.8 ms | 9,908 B |
-| Kyber768 | keypair / enc / dec | 152.6 / 174.2 / 196.0 ms | 210.2 / 238.8 / 272.5 ms | 14,804 B |
-| Kyber1024 | keypair / enc / dec | 238.7 / 263.7 / 291.3 ms | 330.6 / 365.0 / 407.5 ms | 20,916 B |
+| Kyber512 | keypair / enc / dec | 92.7 / 106.9 / 123.9 ms | 127.7 / 145.2 / 170.8 ms | 9,956 B |
+| Kyber768 | keypair / enc / dec | 152.6 / 174.2 / 196.0 ms | 210.3 / 238.9 / 272.5 ms | 14,852 B |
+| Kyber1024 | keypair / enc / dec | 238.8 / 263.8 / 291.4 ms | 330.7 / 365.1 / 407.5 ms | 20,964 B |
 
 - All parameter sets fit in the 32 KiB stack (`STACK_SIZE = 0x8000`).
-- Kyber has no rejection loop in signing-like operations, so these counts
-  barely depend on the seed. They do shift slightly (~0.01%) when code or
-  data moves in memory. For example, adding the stack report to
-  `kyber_cycles.c` changed Kyber768 keypair from 1,525,439 to 1,525,556
-  cycles, because of instruction and data alignment effects. Compare
-  configurations built from the same code.
+- **The seed matters little.** Most iterations are within 0.05% of each
+  other. The exception is the public matrix, which Kyber generates by
+  rejection sampling: now and then a seed needs one more SHAKE128 block.
+  Encapsulation and decapsulation regenerate the matrix, so all three
+  operations of that iteration cost more. Kyber512 and Kyber1024 each had
+  one such seed among the 5: about +22,500 cycles on CV32E40P and +33,000
+  on Ibex per operation (up to 2.6%).
+- **Code layout shifts counts slightly** (~0.01%) when code or data moves in
+  memory, through instruction and data alignment. Adding the stack report
+  to `kyber_cycles.c` changed Kyber768 keypair from 1,525,439 to 1,525,556
+  cycles; the `NTESTS` loop changed it to 1,525,614 (iteration 1, same
+  seed). Compare configurations built from the same code.
 - Both cores run plain RV32IM(F)C code: stock GCC can't generate CV32E40P's
   PULP instructions. Keep this in mind when comparing with published
   figures.
@@ -312,15 +348,16 @@ count always belongs to a correct run.
 | Variable | Default | Tests | Meaning |
 |----------|---------|-------|---------|
 | `DILITHIUM_MODE` | `2` | both | Parameter set: `2` = Dilithium2, `3` = Dilithium3, `5` = Dilithium5 |
-| `NTESTS` | `1` | `dilithium_ref` | Iterations. Upstream uses 10000; each iteration takes ~28 min here. |
+| `NTESTS` | `1` | both | Iterations. `dilithium_ref`: upstream uses 10000; each takes ~28 min here. `dilithium_cycles`: of the three measurements, each with a new message, keys and signing randomness (as for Kyber). |
 | `CORE` | `cv32e40p` | both | `cv32e40p` or `ibex` |
 
 The stack size depends on the mode: 128 KiB (`0x20000`) for Dilithium2 and
 192 KiB (`0x30000`) for Dilithium3/5, set in `test.mk`. Peak use measured by
 `dilithium_cycles` is 52.7 / 80.3 / 123.3 KiB (see the results below), so
 both tests have room to spare, including the ~11 KiB of extra arrays that
-`test_dilithium.c` keeps on its stack. The simulated-time limit is 8 s
-(Dilithium5 on Ibex needs ~1.2 s).
+`test_dilithium.c` keeps on its stack. The simulated-time limit is 8 s per
+iteration (Dilithium5 on Ibex needs ~1.2 s for the fixed seed; the slowest
+of the 5 seeds below, Dilithium3 on Ibex, ~1.9 s).
 
 Each setting builds into its own directory (e.g.
 `build/sw-<core>/dilithium_cycles-mode3/`), so no clean is needed when
@@ -328,44 +365,59 @@ switching:
 
 ```sh
 make run TEST=dilithium_cycles DILITHIUM_MODE=3
+make run TEST=dilithium_cycles DILITHIUM_MODE=3 NTESTS=5   # build/sw-<core>/dilithium_cycles-mode3-n5/
 ```
 
-### Results (`-O2`, all parameter sets)
+`NTESTS` works as for `kyber_cycles`: iteration 1 is the fixed seed, then
+min, median and max are printed, and `env/cycles_table.py` makes the table.
 
-Cycles:
+### Results (`-O2`, all parameter sets, `NTESTS=5`)
 
-| Parameter set | Operation | CV32E40P | Ibex | Ibex / CV32E40P |
-|---------------|-----------|---------:|-----:|----------------:|
-| Dilithium2 (`DILITHIUM_MODE=2`) | `crypto_sign_keypair` | 3,307,132 | 4,470,567 | 1.35 |
-| | `crypto_sign` | 22,185,892 | 27,902,534 | 1.26 |
-| | `crypto_sign_open` | 3,582,361 | 4,769,927 | 1.33 |
-| Dilithium3 (`DILITHIUM_MODE=3`) | `crypto_sign_keypair` | 5,862,770 | 7,885,341 | 1.34 |
-| | `crypto_sign` | 23,929,764 | 29,310,726 | 1.22 |
-| | `crypto_sign_open` | 6,004,625 | 7,951,948 | 1.32 |
-| Dilithium5 (`DILITHIUM_MODE=5`) | `crypto_sign_keypair` | 9,872,005 | 13,342,864 | 1.35 |
-| | `crypto_sign` | 25,324,770 | 31,619,827 | 1.25 |
-| | `crypto_sign_open` | 10,155,428 | 13,554,960 | 1.33 |
+Cycles. **1 seed** is iteration 1 (the fixed seed); median and min – max are
+over the 5 iterations:
 
-Time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
+| Parameter set | Operation | CV32E40P 1 seed | median | min – max | Ibex 1 seed | median | min – max |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Dilithium2 (n = 5) | `crypto_sign_keypair` | 3,335,297 | 3,357,863 | 3,335,297 – 3,357,970 | 4,474,813 | 4,507,039 | 4,474,813 – 4,507,174 |
+|  | `crypto_sign` | 22,485,241 | 14,125,617 | 5,420,911 – 22,485,241 | 27,942,795 | 17,629,262 | 6,915,398 – 27,942,795 |
+|  | `crypto_sign_open` | 3,617,716 | 3,618,002 | 3,617,716 – 3,618,234 | 4,775,118 | 4,775,441 | 4,775,118 – 4,775,722 |
+| Dilithium3 (n = 5) | `crypto_sign_keypair` | 5,837,096 | 5,838,147 | 5,836,952 – 5,838,520 | 7,895,178 | 7,896,285 | 7,895,068 – 7,896,707 |
+|  | `crypto_sign` | 23,598,885 | 25,053,918 | 13,928,560 – 63,402,423 | 29,348,490 | 31,215,653 | 17,587,171 – 78,232,370 |
+|  | `crypto_sign_open` | 5,978,366 | 5,978,569 | 5,978,205 – 5,978,663 | 7,959,930 | 7,960,159 | 7,959,753 – 7,960,263 |
+| Dilithium5 (n = 5) | `crypto_sign_keypair` | 9,835,904 | 9,835,904 | 9,700,649 – 9,858,772 | 13,359,105 | 13,359,105 | 13,165,893 – 13,391,654 |
+|  | `crypto_sign` | 25,018,373 | 13,386,470 | 13,386,228 – 38,059,527 | 31,660,482 | 17,436,086 | 17,435,821 – 47,521,302 |
+|  | `crypto_sign_open` | 10,113,046 | 10,112,918 | 10,112,788 – 10,113,046 | 13,571,129 | 13,570,989 | 13,570,853 – 13,571,129 |
+
+Median time at 10 MHz (the SoC clock of the Nexys FPGA targets) and peak stack:
 
 | Parameter set | Operation | CV32E40P | Ibex | Peak stack (both cores) |
 |---------------|-----------|---------:|-----:|------------------------:|
-| Dilithium2 | keypair / sign / open | 330.7 / 2,218.6 / 358.2 ms | 447.1 / 2,790.3 / 477.0 ms | 52,692 of 131,072 B |
-| Dilithium3 | keypair / sign / open | 586.3 / 2,393.0 / 600.5 ms | 788.5 / 2,931.1 / 795.2 ms | 80,340 of 196,608 B |
-| Dilithium5 | keypair / sign / open | 987.2 / 2,532.5 / 1,015.5 ms | 1,334.3 / 3,162.0 / 1,355.5 ms | 123,332 of 196,608 B |
+| Dilithium2 | keypair / sign / open | 335.8 / 1,412.6 / 361.8 ms | 450.7 / 1,762.9 / 477.5 ms | 52,724 of 131,072 B |
+| Dilithium3 | keypair / sign / open | 583.8 / 2,505.4 / 597.9 ms | 789.6 / 3,121.6 / 796.0 ms | 80,372 of 196,608 B |
+| Dilithium5 | keypair / sign / open | 983.6 / 1,338.6 / 1,011.3 ms | 1,335.9 / 1,743.6 / 1,357.1 ms | 123,364 of 196,608 B |
 
 **Signing time varies with the input.** Dilithium signing repeats an inner
 loop until a candidate signature passes its checks (rejection sampling), and
-the number of repetitions depends on the key, message and randomness. Each
-count above is one sample for the fixed seed. A different seed or message
-gives a different signing count, often by a large factor. Key generation and
-verification vary only slightly. Published benchmarks usually report the median over many runs.
+the number of repetitions depends on the key, message and randomness. Over
+the 5 seeds, signing varies by a factor of 2.8 to 4.6 (Dilithium2 on
+CV32E40P: 5.4 to 22.5 million cycles). The fixed seed happens to be a slow
+one for Dilithium2 and Dilithium5. Key generation varies by up to ~1.7%
+(rejection sampling while expanding the matrix and the secret vectors),
+verification by ~0.01%.
 
-This is why the signing counts above barely grow from Dilithium2 to
-Dilithium5, while key generation and verification roughly triple. Each
-signing count is a single sample, and the number of loop repetitions
-differs between the modes. Don't compare signing cost between modes from
-these numbers. The same layout drift as for Kyber (~0.01%) applies.
+Five samples are still few for signing: the median can move a lot with
+more seeds, so don't compare signing cost between modes from these
+numbers. Published benchmarks usually report the median over hundreds or
+thousands of runs; raise `NTESTS` for that (each Dilithium iteration takes
+~25 to 70 min of simulation).
+
+The fixed-seed counts (1 seed) differ from earlier `NTESTS=1` runs by up to
+1.4% on CV32E40P (Dilithium2 keypair: 3,307,132 then, 3,335,297 now), with
+the same inputs. The `NTESTS` loop moved the Dilithium code by 0x422 bytes,
+not a multiple of 4, so every hot function changed its 4-byte alignment.
+CV32E40P is sensitive to that (a 32-bit instruction that spans two words
+takes an extra fetch). On Ibex the difference is at most 0.2%; for Kyber
+the code moved by a multiple of 4 and the counts changed by ~0.005%.
 
 ## FPGA area
 

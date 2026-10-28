@@ -10,26 +10,27 @@ day-to-day usage, see [README.md](README.md).
 | **Repo** | `/home/baris/gstl/pulpissimo-pqc` (a copy of `/home/baris/gstl/pulpissimo`) |
 | **Constraint** | Do **not** modify upstream/tracked code. Everything lives in `tests/`. Exceptions, all at the user's request: `/kyber/` and `/dilithium/` in the root `.gitignore` (the user prefers the root-anchored form), and a note at the top of the root `README.md` pointing to `tests/` (the rest of that README is unchanged). |
 | **Simulator** | Verilator, both cores (`CORE=cv32e40p` default, `CORE=ibex`) |
-| **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles`, `dilithium_ref`, `dilithium_cycles` |
+| **Tests** | `hello`, `l2_preload`, `cycle_count`, `kyber_ref`, `kyber_cycles`, `dilithium_ref`, `dilithium_cycles` (the two `_cycles` tests take `NTESTS` for several seeds; `env/cycles_table.py` makes the table) |
 | **Hardware** | No JTAG adapter yet; board not confirmed (Nexys Video or Nexys 4 DDR) |
 | **FPGA area** | `tests/fpga/`: Vivado synthesis for the Nexys 4 DDR (XC7A100T), `make area [CORE=ibex]`, see [fpga/README.md](fpga/README.md) |
 | **Open issue** | [The simulator does not rebuild when RTL changes](#open-issue-simulator-does-not-rebuild-when-rtl-changes) |
 
-### Kyber cycle counts (headline result, current code)
+### Kyber cycle counts (headline result, current code, `NTESTS=5`)
 
-| Parameter set | Operation | CV32E40P | Ibex |
-|---|---|---:|---:|
-| Kyber512 | `crypto_kem_keypair` | 926,508 | 1,276,781 |
-| | `crypto_kem_enc` | 1,068,539 | 1,451,933 |
-| | `crypto_kem_dec` | 1,238,966 | 1,707,637 |
-| Kyber768 | `crypto_kem_keypair` | 1,525,556 | 2,102,196 |
-| | `crypto_kem_enc` | 1,741,674 | 2,388,046 |
-| | `crypto_kem_dec` | 1,959,668 | 2,724,962 |
-| Kyber1024 | `crypto_kem_keypair` | 2,386,757 | 3,306,081 |
-| | `crypto_kem_enc` | 2,637,353 | 3,649,998 |
-| | `crypto_kem_dec` | 2,913,387 | 4,074,590 |
+| Parameter set | Operation | CV32E40P 1 seed | median | min – max | Ibex 1 seed | median | min – max |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Kyber512 (n = 5) | `crypto_kem_keypair` | 926,554 | 926,554 | 926,184 – 948,783 | 1,276,851 | 1,276,851 | 1,276,431 – 1,309,431 |
+|  | `crypto_kem_enc` | 1,068,586 | 1,068,586 | 1,068,216 – 1,090,817 | 1,452,007 | 1,452,007 | 1,451,586 – 1,484,586 |
+|  | `crypto_kem_dec` | 1,239,141 | 1,239,141 | 1,238,771 – 1,261,369 | 1,707,845 | 1,707,845 | 1,707,424 – 1,740,424 |
+| Kyber768 (n = 5) | `crypto_kem_keypair` | 1,525,614 | 1,526,011 | 1,525,231 – 1,526,232 | 2,102,266 | 2,102,725 | 2,101,854 – 2,102,907 |
+|  | `crypto_kem_enc` | 1,741,732 | 1,742,133 | 1,741,353 – 1,742,351 | 2,388,120 | 2,388,578 | 2,387,707 – 2,388,760 |
+|  | `crypto_kem_dec` | 1,959,706 | 1,960,106 | 1,959,327 – 1,960,320 | 2,725,040 | 2,725,498 | 2,724,627 – 2,725,680 |
+| Kyber1024 (n = 5) | `crypto_kem_keypair` | 2,386,803 | 2,387,592 | 2,386,654 – 2,409,207 | 3,306,151 | 3,306,950 | 3,305,971 – 3,338,955 |
+|  | `crypto_kem_enc` | 2,637,400 | 2,638,184 | 2,637,247 – 2,659,801 | 3,650,072 | 3,650,870 | 3,649,891 – 3,682,875 |
+|  | `crypto_kem_dec` | 2,913,431 | 2,914,217 | 2,913,282 – 2,935,833 | 4,074,617 | 4,075,415 | 4,074,436 – 4,107,420 |
 
-Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4).
+"1 seed" is iteration 1 (the fixed seed). Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4)
+and [Several iterations](#2026-10-28-several-iterations-ntests-for-the-cycle-tests).
 
 ### FPGA area, Nexys 4 DDR (headline result, post-`opt_design`)
 
@@ -42,23 +43,24 @@ Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-
 
 Details in [FPGA area](#2026-10-27-fpga-area-testsfpga).
 
-### Dilithium cycle counts (headline result)
+### Dilithium cycle counts (headline result, `NTESTS=5`)
 
-| Parameter set | Operation | CV32E40P | Ibex |
-|---|---|---:|---:|
-| Dilithium2 | `crypto_sign_keypair` | 3,307,132 | 4,470,567 |
-| | `crypto_sign` | 22,185,892 | 27,902,534 |
-| | `crypto_sign_open` | 3,582,361 | 4,769,927 |
-| Dilithium3 | `crypto_sign_keypair` | 5,862,770 | 7,885,341 |
-| | `crypto_sign` | 23,929,764 | 29,310,726 |
-| | `crypto_sign_open` | 6,004,625 | 7,951,948 |
-| Dilithium5 | `crypto_sign_keypair` | 9,872,005 | 13,342,864 |
-| | `crypto_sign` | 25,324,770 | 31,619,827 |
-| | `crypto_sign_open` | 10,155,428 | 13,554,960 |
+| Parameter set | Operation | CV32E40P 1 seed | median | min – max | Ibex 1 seed | median | min – max |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Dilithium2 (n = 5) | `crypto_sign_keypair` | 3,335,297 | 3,357,863 | 3,335,297 – 3,357,970 | 4,474,813 | 4,507,039 | 4,474,813 – 4,507,174 |
+|  | `crypto_sign` | 22,485,241 | 14,125,617 | 5,420,911 – 22,485,241 | 27,942,795 | 17,629,262 | 6,915,398 – 27,942,795 |
+|  | `crypto_sign_open` | 3,617,716 | 3,618,002 | 3,617,716 – 3,618,234 | 4,775,118 | 4,775,441 | 4,775,118 – 4,775,722 |
+| Dilithium3 (n = 5) | `crypto_sign_keypair` | 5,837,096 | 5,838,147 | 5,836,952 – 5,838,520 | 7,895,178 | 7,896,285 | 7,895,068 – 7,896,707 |
+|  | `crypto_sign` | 23,598,885 | 25,053,918 | 13,928,560 – 63,402,423 | 29,348,490 | 31,215,653 | 17,587,171 – 78,232,370 |
+|  | `crypto_sign_open` | 5,978,366 | 5,978,569 | 5,978,205 – 5,978,663 | 7,959,930 | 7,960,159 | 7,959,753 – 7,960,263 |
+| Dilithium5 (n = 5) | `crypto_sign_keypair` | 9,835,904 | 9,835,904 | 9,700,649 – 9,858,772 | 13,359,105 | 13,359,105 | 13,165,893 – 13,391,654 |
+|  | `crypto_sign` | 25,018,373 | 13,386,470 | 13,386,228 – 38,059,527 | 31,660,482 | 17,436,086 | 17,435,821 – 47,521,302 |
+|  | `crypto_sign_open` | 10,113,046 | 10,112,918 | 10,112,788 – 10,113,046 | 13,571,129 | 13,570,989 | 13,570,853 – 13,571,129 |
 
-Signing counts are single samples (rejection sampling), so they are not
-comparable between modes. Details in
-[Dilithium parameter sweep](#2026-10-26-dilithium-parameter-sweep-dilithium_mode--2-3-5).
+Signing varies by a factor of 2.8 to 4.6 between seeds (rejection
+sampling); 5 samples are too few to compare signing between modes. Details
+in [Dilithium parameter sweep](#2026-10-26-dilithium-parameter-sweep-dilithium_mode--2-3-5)
+and [Several iterations](#2026-10-28-several-iterations-ntests-for-the-cycle-tests).
 
 ---
 
@@ -718,6 +720,62 @@ of memory. The SoC part is the same for both cores to within 0.3%.
   FPGA.
 
 ---
+
+## 2026-10-28: Several iterations (`NTESTS`) for the cycle tests
+
+The user asked for `kyber_cycles` and `dilithium_cycles` with 5 different
+seeds, and a table with the single-seed count, the median and min – max per
+operation, for all parameter sets. (The user said `N_TEST`; the tests
+already used `NTESTS` for `kyber_ref` / `dilithium_ref`, so the cycle tests
+use the same name.)
+
+### Changes
+
+| File | Change |
+|---|---|
+| `kyber_cycles/kyber_cycles.c`, `dilithium_cycles/dilithium_cycles.c` | Loop over `NTESTS` (default 1). Counts stored in static arrays, printed after all iterations (`iteration <i>` headers only when `NTESTS > 1`), then min / median / max. A failed check in any iteration fails the test. Dilithium draws the message inside the loop, in the same PRNG order as before. |
+| `env/include/cycles.h` | `cycles_str()` (64-bit formatting, used by `cycles_print()`) and `cycles_print_stats()` (insertion sort, median of an even count = mean of the middle two) |
+| both `test.mk` | `NTESTS ?= 1`, `-DNTESTS`; `SW_VARIANT` gets `-n<N>` only for `NTESTS != 1`, so the existing `k3` / `mode2` directories keep their names; `TIMEOUT_US` = 2 s / 8 s × `NTESTS` |
+| `env/cycles_table.py` (new) | Markdown table from `sim.log` files: 1 seed / median / min – max per core. Core from `build/sw-<core>/`, parameter set from the first printed line. Kyber first. |
+
+**Seeds:** no explicit reseeding. Each iteration continues the xorshift32
+stream, which gives new keys, messages and randomness. Iteration 1 therefore
+has exactly the inputs of an `NTESTS=1` run (and of all earlier results).
+
+### Run
+
+All 12 runs (`NTESTS=5`) in parallel with `xargs -P 8` on the 8-core
+machine: all PASSED. Longest: Dilithium3 on Ibex, 5.8 h wall time (21,054 s,
+5.46 s simulated); Dilithium5 on Ibex 5.8 h; Kyber1024 on Ibex 1.5 h. With
+8 jobs at once, the simulator ran at ~200–270 µs/s instead of ~250–295.
+
+### Results
+
+See the headline tables above, and the README for the 10 MHz times (medians).
+Peak stack is 32 B higher (Dilithium) / 48 B higher (Kyber) than before, from
+`main()`'s larger frame.
+
+### Facts learned
+
+- **Kyber:** seed dependence is small, except when the matrix rejection
+  sampling needs one more SHAKE128 block; enc and dec regenerate the matrix,
+  so all three operations of that iteration pay (Kyber512 and Kyber1024 had
+  one such seed each: +2.4% CV32E40P, +2.6% Ibex). Otherwise < 0.05%.
+- **Dilithium:** signing varies by a factor of 2.8–4.6 over 5 seeds; the
+  fixed seed is slow for Dilithium2 (the maximum) and Dilithium5. Keypair
+  up to ~1.7% (matrix and secret-vector rejection sampling), verification
+  ~0.01%.
+- **Layout drift, larger than seen before:** iteration 1 (same inputs as
+  before) differs from the earlier `NTESTS=1` numbers by up to 1.4% on
+  CV32E40P for Dilithium (keypair 3,307,132 -> 3,335,297, sign 23,929,764
+  -> 23,598,885 for Dilithium3), ≤ 0.2% on Ibex. Cause: the loop moved the
+  Dilithium code by 0x422 bytes (`nm`: `KeccakF1600_StatePermute` at
+  0x1c022fa8 before, 0x1c0233ca now), i.e. by 2 mod 4, so every hot
+  function's 4-byte alignment flipped. CV32E40P needs an extra fetch for a
+  32-bit instruction that spans two words. Kyber moved by 0x508 (0 mod 4):
+  ~0.005% change. The earlier "~0.01% drift" statement only holds when
+  alignment mod 4 stays the same.
+- The C and Python min / median / max agree.
 
 ## Reference: clock frequencies
 

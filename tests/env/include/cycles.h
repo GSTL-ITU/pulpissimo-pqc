@@ -49,19 +49,43 @@ static inline uint64_t cycles_overhead(void)
     return t1 - t0;
 }
 
-/* The minimal libc printf has no 64-bit integer support, so format here. */
-static inline void cycles_print(const char *label, uint64_t cycles)
+/* The minimal libc printf has no 64-bit integer support, so format here.
+ * Returns a pointer into buf (at least 21 bytes). */
+static inline const char *cycles_str(char *buf, uint64_t cycles)
 {
-    char buf[21];
-    int  i = sizeof(buf) - 1;
+    int i = 20;
 
     buf[i] = '\0';
     do {
         buf[--i] = '0' + (char)(cycles % 10);
         cycles /= 10;
     } while (cycles != 0);
+    return &buf[i];
+}
 
-    printf("%s: %s cycles\n", label, &buf[i]);
+static inline void cycles_print(const char *label, uint64_t cycles)
+{
+    char buf[21];
+
+    printf("%s: %s cycles\n", label, cycles_str(buf, cycles));
+}
+
+/* Min, median and max of n measurements (n >= 1). Sorts c in place; for an
+ * even n the median is the mean of the two middle values (rounded down). */
+static inline void cycles_print_stats(const char *label, uint64_t *c, int n)
+{
+    char b0[21], b1[21], b2[21];
+    uint64_t median;
+
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0 && c[j - 1] > c[j]; j--) {
+            uint64_t t = c[j];
+            c[j] = c[j - 1];
+            c[j - 1] = t;
+        }
+    median = (n % 2) ? c[n / 2] : (c[n / 2 - 1] + c[n / 2]) / 2;
+    printf("%s: min %s, median %s, max %s cycles\n", label,
+           cycles_str(b0, c[0]), cycles_str(b1, median), cycles_str(b2, c[n - 1]));
 }
 
 #endif

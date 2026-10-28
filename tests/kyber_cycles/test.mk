@@ -7,10 +7,15 @@ PULP_APP_CFLAGS += -I$(KYBER_DIR)
 # Kyber parameter set: 2 = Kyber512, 3 = Kyber768, 4 = Kyber1024
 KYBER_K ?= 3
 PULP_APP_CFLAGS += -DKYBER_K=$(KYBER_K)
-# Separate build directory per configuration (see tests/Makefile)
-SW_VARIANT = k$(KYBER_K)
+# Iterations, each with new keys and randomness (see the .c file)
+NTESTS ?= 1
+PULP_APP_CFLAGS += -DNTESTS=$(NTESTS)
+# Separate build directory per configuration (see tests/Makefile); NTESTS = 1
+# keeps the name it had before NTESTS existed
+SW_VARIANT = k$(KYBER_K)$(if $(filter-out 1,$(NTESTS)),-n$(NTESTS))
 
 # Keys, ciphertexts and polynomial vectors live on the stack
 STACK_SIZE = 0x8000
 
-TIMEOUT_US = 2000000
+# Simulated-time limit, per iteration
+TIMEOUT_US = $(shell echo $$((2000000 * $(NTESTS))))
