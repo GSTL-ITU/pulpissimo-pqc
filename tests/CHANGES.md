@@ -32,16 +32,19 @@ day-to-day usage, see [README.md](README.md).
 "1 seed" is iteration 1 (the fixed seed). Details in [Kyber parameter sweep](#2026-10-26-kyber-parameter-sweep-kyber_k--2-3-4)
 and [Several iterations](#2026-10-28-several-iterations-ntests-for-the-cycle-tests).
 
-### FPGA area, Nexys 4 DDR (headline result, post-`opt_design`)
+### FPGA area, Nexys 4 DDR (headline result, post-route)
 
 | | CV32E40P (LUTs / FFs / BRAM / DSPs) | Ibex |
 |---|---:|---:|
-| Whole design | 42,830 / 22,339 / 82 / 12 | 34,883 / 20,684 / 82 / 4 |
-| Core | 7,418 / 2,660 / 0 / 7 | 3,280 / 1,387 / 0 / 1 |
-| FPU | 3,723 / 382 / 0 / 2 | – |
-| SoC without core and FPU | 31,689 / 19,297 / 82 / 3 | 31,603 / 19,297 / 82 / 3 |
+| Whole design | 41,343 / 22,339 / 82 / 12 | 33,463 / 20,684 / 82 / 4 |
+| Core | 7,302 / 2,660 / 0 / 7 | 3,181 / 1,387 / 0 / 1 |
+| FPU | 3,666 / 382 / 0 / 2 | – |
+| SoC without core and FPU | 30,375 / 19,297 / 82 / 3 | 30,282 / 19,297 / 82 / 3 |
 
-Details in [FPGA area](#2026-10-27-fpga-area-testsfpga).
+Post-`opt_design` (without `IMPL=1`) gives 3–4% more LUTs, same FFs/BRAM/DSPs.
+Setup met at 10 MHz; **hold fails** (upstream's LUT clock gating). Details in
+[FPGA area](#2026-10-27-fpga-area-testsfpga) and
+[post-route](#2026-10-29-fpga-area-post-route-impl1).
 
 ### Dilithium cycle counts (headline result, `NTESTS=5`)
 
@@ -776,6 +779,32 @@ Peak stack is 32 B higher (Dilithium) / 48 B higher (Kyber) than before, from
   ~0.005% change. The earlier "~0.01% drift" statement only holds when
   alignment mod 4 stays the same.
 - The C and Python min / median / max agree.
+
+## 2026-10-29: FPGA area post-route (`IMPL=1`)
+
+The user asked for post-route instead of post-`opt_design` numbers. No code
+change was needed: `make area IMPL=1` (place, route, utilization and timing
+reports) already existed. Ran both cores; ~13 min each (CV32E40P with
+`JOBS=4` while the other ran, Ibex alone), ~3.8 GB peak.
+
+- Results in the headline table; `tests/build/fpga/compare.md` is now the
+  post-route comparison, `<core>/reports/util_hier_opt.rpt` is still written.
+- **LUTs drop 3–4% from post-`opt_design` to post-route** (placement
+  repacking): CV32E40P 42,830 -> 41,343, Ibex 34,883 -> 33,463, cores
+  7,418 -> 7,302 and 3,280 -> 3,181. FFs, BRAM, DSPs identical. Slices:
+  12,894 (81.4%) and 11,577 (73.0%).
+- **Timing:** setup met everywhere (SoC clock 10 MHz: WNS 34.5 ns CV32E40P,
+  46.0 ns Ibex). **Hold fails**: SoC clock WHS −0.27 / −0.23 ns (~300
+  endpoints), JTAG `tck` −1.6 / −1.8 ns (54 / 85 endpoints). Cause:
+  upstream's `pulp_clock_gating_xilinx.sv` is latch + AND, so gated clocks
+  run through LUTs (`Place 30-568` warnings, ~20 per core, e.g. a uDMA gate
+  driving 3,802 registers); the worst paths have 2.3–2.7 ns clock skew.
+  Upstream's own flow has the same cells. Not fixed (would mean changing
+  upstream's FPGA cells or overriding them in `tests/fpga`); relevant
+  for a board bring-up, not for area.
+- Pitfall in my first attempt: `cd dir && A & B & wait` runs `cd` only in
+  A's background subshell, so B ran in the wrong directory. Use a subshell
+  per job or absolute paths.
 
 ## Reference: clock frequencies
 

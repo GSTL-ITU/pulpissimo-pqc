@@ -426,16 +426,22 @@ reports LUTs, FFs, BRAM and DSPs for the core, the FPU and each SoC block:
 
 ```sh
 cd fpga
-make area              # CV32E40P with FPU, ~9 min
+make area              # CV32E40P with FPU, post-opt_design, ~9 min
 make area CORE=ibex
+make compare IMPL=1    # both cores, post-route, ~13 min each
 ```
+
+Post-route:
 
 | | CV32E40P | Ibex |
 |---|---:|---:|
-| Whole design (LUTs / FFs / BRAM / DSPs) | 42,830 / 22,339 / 82 / 12 | 34,883 / 20,684 / 82 / 4 |
-| Core | 7,418 / 2,660 / 0 / 7 | 3,280 / 1,387 / 0 / 1 |
-| FPU | 3,723 / 382 / 0 / 2 | – |
-| SoC without core and FPU | 31,689 / 19,297 / 82 / 3 | 31,603 / 19,297 / 82 / 3 |
+| Whole design (LUTs / FFs / BRAM / DSPs) | 41,343 / 22,339 / 82 / 12 | 33,463 / 20,684 / 82 / 4 |
+| Core | 7,302 / 2,660 / 0 / 7 | 3,181 / 1,387 / 0 / 1 |
+| FPU | 3,666 / 382 / 0 / 2 | – |
+| SoC without core and FPU | 30,375 / 19,297 / 82 / 3 | 30,282 / 19,297 / 82 / 3 |
+
+Setup timing is met at the Nexys clocks (10 MHz SoC); hold is not, because
+of upstream's LUT-based clock gating (details in the FPGA README).
 
 Details, options and how it differs from the upstream FPGA flow:
 [fpga/README.md](fpga/README.md).
